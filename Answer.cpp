@@ -6,7 +6,16 @@
 /// @attention  このファイルの利用は、同梱のREADMEにある
 ///             利用条件に従ってください。
 //------------------------------------------------------------------------------
+#include <algorithm>
+#include <cassert>
+#include <numeric>
+#include <vector>
 #include "Answer.hpp"
+#define REP(i, n) for (int i = 0; (i) < (int)(n); ++ (i))
+#define REP3(i, m, n) for (int i = (m); (i) < (int)(n); ++ (i))
+#define REP_R(i, n) for (int i = int(n) - 1; (i) >= 0; -- (i))
+#define REP3R(i, m, n) for (int i = int(n) - 1; (i) >= (int)(m); -- (i))
+#define ALL(x) begin(x), end(x)
 
 //------------------------------------------------------------------------------
 namespace hpc {
@@ -14,6 +23,7 @@ namespace hpc {
 using namespace std;
 
 class solver {
+
 public:
     Stage const & stage;
     solver(Stage const & stage_)
@@ -21,20 +31,35 @@ public:
     }
 
     Action decide_next_action(Stage const & stage_) {
-        // 解答コードのサンプルです
+        // 大きいやつから先に試す
+        for (auto lane_type : { CandidateLaneType_Large, CandidateLaneType_Small }) {
 
-        // 小さい生地の生地置き場にある、0番目の生地を対象として
-        auto laneType = CandidateLaneType_Small;
-        int pieceIndex = 0;
-        const auto& piece = stage.candidateLane(laneType).pieces()[pieceIndex];
+            // 面積順に整列
+            vector<int> order(Parameter::CandidatePieceCount);
+            iota(ALL(order), 0);
+            sort(ALL(order), [&](int i, int j) {
+                auto const & p = stage.candidateLane(lane_type).pieces()[i];
+                auto const & q = stage.candidateLane(lane_type).pieces()[j];
+                int a = p.width() * p.height();
+                int b = q.width() * q.height();
+                return a > b;
+            });
 
-        // オーブンの原点に配置できそうなら、配置する
-        Vector2i putPos(0, 0);
-        if (stage.oven().isAbleToPut(piece, putPos)) {
-            return Action::Put(laneType, pieceIndex, putPos);
+            // 置けそうなら貪欲に置く
+            for (int i : order) {
+                auto const & piece = stage.candidateLane(lane_type).pieces()[i];
+                REP (y, Parameter::OvenHeight) {
+                    REP (x, Parameter::OvenWidth) {
+                        Vector2i p(y, x);
+                        if (stage.oven().isAbleToPut(piece, p)) {
+                            return Action::Put(lane_type, i, p);
+                        }
+                    }
+                }
+            }
         }
 
-        // 配置できないなら、このターンは何もしない
+        // 何もしない
         return Action::Wait();
     }
 };
