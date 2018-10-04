@@ -50,7 +50,9 @@ public:
                 auto const & piece = stage.candidateLane(lane_type).pieces()[i];
                 REP (y, Parameter::OvenHeight) {
                     REP (x, Parameter::OvenWidth) {
-                        Vector2i p(y, x);
+                        Vector2i p = (lane_type == CandidateLaneType_Large) ?
+                            Vector2i(y, x) :
+                            Vector2i(Parameter::OvenHeight - y - 1, Parameter::OvenWidth - x - 1);
                         if (stage.oven().isAbleToPut(piece, p)) {
                             return Action::Put(lane_type, i, p);
                         }
