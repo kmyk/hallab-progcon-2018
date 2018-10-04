@@ -11,6 +11,37 @@
 //------------------------------------------------------------------------------
 namespace hpc {
 
+using namespace std;
+
+class solver {
+public:
+    Stage const & stage;
+    solver(Stage const & stage_)
+            : stage(stage_) {
+    }
+
+    Action decide_next_action(Stage const & stage_) {
+        // 解答コードのサンプルです
+
+        // 小さい生地の生地置き場にある、0番目の生地を対象として
+        auto laneType = CandidateLaneType_Small;
+        int pieceIndex = 0;
+        const auto& piece = stage.candidateLane(laneType).pieces()[pieceIndex];
+
+        // オーブンの原点に配置できそうなら、配置する
+        Vector2i putPos(0, 0);
+        if (stage.oven().isAbleToPut(piece, putPos)) {
+            return Action::Put(laneType, pieceIndex, putPos);
+        }
+
+        // 配置できないなら、このターンは何もしない
+        return Action::Wait();
+    }
+};
+
+solver *g_solver = nullptr;
+
+
 //------------------------------------------------------------------------------
 /// コンストラクタ。
 /// @detail 最初のステージ開始前に実行したい処理があればここに書きます。
@@ -31,6 +62,7 @@ Answer::~Answer()
 /// @param aStage 現在のステージ。
 void Answer::init(const Stage& aStage)
 {
+    g_solver = new solver(aStage);
 }
 
 //------------------------------------------------------------------------------
@@ -41,21 +73,7 @@ void Answer::init(const Stage& aStage)
 /// @param aStage 現在のステージ。
 Action Answer::decideNextAction(const Stage& aStage)
 {
-    // 解答コードのサンプルです
-
-    // 小さい生地の生地置き場にある、0番目の生地を対象として
-    auto laneType = CandidateLaneType_Small;
-    int pieceIndex = 0;
-    const auto& piece = aStage.candidateLane(laneType).pieces()[pieceIndex];
-
-    // オーブンの原点に配置できそうなら、配置する
-    Vector2i putPos(0, 0);
-    if (aStage.oven().isAbleToPut(piece, putPos)) {
-        return Action::Put(laneType, pieceIndex, putPos);
-    }
-
-    // 配置できないなら、このターンは何もしない
-    return Action::Wait();
+    return g_solver->decide_next_action(aStage);
 }
 
 //------------------------------------------------------------------------------
@@ -64,6 +82,8 @@ Action Answer::decideNextAction(const Stage& aStage)
 /// @param aStage 現在のステージ。
 void Answer::finalize(const Stage& aStage)
 {
+    delete g_solver;
+    g_solver = nullptr;
 }
 
 } // namespace
