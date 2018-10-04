@@ -1,0 +1,90 @@
+<!--
+HAL Programming Contest 2018 Viewer
+Copyright (c) 2018 HAL Laboratory, Inc.
+ -->
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+<title>viewer</title>
+<div>
+ <div class="import">
+   <label>
+     <input @change="import" @click="reset" type="file">
+     IE,Edge以外であればドラッグ＆ドロップでもファイルを読み込ませることができます。
+   </label>
+   <span v-if="totalScore" v-text="'TotalScore: '+totalScore.toLocaleString()"></span>
+ </div>
+ <div v-show="json" class="ctrlpanels">
+   <fieldset>
+     <legend>Stage</legend>
+     <div class="stagebuttons">
+       <button v-for="(i,s) in stages" :class="stage===i?'current':''" @click="stage=i" :style="{background:stageColor(i)}"></button>
+     </div>
+     <div v-text="'ボタンの色は、スコアが'+badColorScore.toLocaleString()+'以下なら赤色、'+goodColorScore.toLocaleString()+'以上だと緑色になります'"></div>
+     <div class="ctrlpanel">
+       <button @click="stage=0" :disabled="isPlay||stage==0">&lt;&lt;</button>
+       <button @click="stage--" :disabled="isPlay||stage==0">&lt;</button>
+       <input v-model="stage" :disabled="isPlay" type="number">
+       <button @click="stage++" :disabled="isPlay||stage>=stages.length-1">&gt;</button>
+       <button @click="stage=stages.length-1" :disabled="isPlay||stage>=stages.length-1">&gt;&gt;</button>
+       <span v-text="'(0 〜 '+(stages.length-1)+')'"></span>
+     </div>
+   </fieldset>
+   <fieldset>
+     <legend>Turn</legend>
+     <div class="ctrlpanel">
+       <button @click="turn=0" :disabled="isPlay||turn==0">&lt;&lt;</button>
+       <button @click="turn--" :disabled="isPlay||turn==0">&lt;</button>
+       <input v-model="turn" :disabled="isPlay" type="number">
+       <button @click="turn++" :disabled="isPlay||turn>=turns.length-1">&gt;</button>
+       <button @click="turn=turns.length-1" :disabled="isPlay||turn>=turns.length-1">&gt;&gt;</button>
+       <span v-text="'(0 〜 '+(turns.length-1)+')'"></span>
+     </div>
+     <div @mousedown="drag($event)" id="slider">
+       <div></div>
+       <div @mouseup="isDrag=false" @mousemove="drag($event)" v-show="isDrag" class="mask"></div>
+     </div>
+   </fieldset>
+   <fieldset>
+     <legend>Play</legend>
+     <button @click="isPlay=!isPlay" v-text="isPlay?'停止':'再生'"></button>
+     <div class="ctrlpanel">
+       <label><input v-model="playType" type="radio" value="0">通常再生</label>
+       <label><input v-model="playType" type="radio" value="1">繰り返し</label>
+       <label><input v-model="playType" type="radio" value="2">連続再生</label>
+     </div>
+   </fieldset>
+ </div>
+ <div v-show="json" class="field">
+   <p v-text="'StageScore: '+turns[turn][1].toLocaleString()+' / '+stages[stage][1].toLocaleString()"></p>
+   <ul class="ovens">
+     <li v-for="(i,oven) in ovens">
+       <ul class="mesh" :style="ovenStyle(i)">
+         <li v-for="(j,piece) in oven[1]" :style="bakingPieceStyle(i,j)">
+           <div class="mesh">
+             <div>
+               焼け度合い : {{ piece[3] }}/{{ piece[4] }}<br>
+               獲得スコア : {{ piece[5] }}
+             </div>
+           </div>
+         </li>
+       </ul>
+     </li>
+   </ul>
+   <ul class="lanes">
+     <li v-for="(i,pieces) in candidates">
+       <ul class="candidates">
+         <li v-for="(j,piece) in pieces">
+           <div class="param" v-text="candidates[i][j][4]+' : '+candidates[i][j][5]"></div>
+           <div><div class="mesh" :style="candidatePieceStyle(i,j)"></div></div>
+         </li>
+       </ul>
+     </li>
+   </ul>
+   <div class="param">焼き時間 : 獲得スコア</div>
+ </div>
+</div>
+<script src="vue.min.js"></script>
+<script src="main.js"></script>
