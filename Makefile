@@ -13,7 +13,7 @@ run: $(ExecuteFile)
 
 json: $(ExecuteFile)
 	[ -d json ] || mkdir json
-	make -C hpc2018 json > json/$(shell date +%Y-%m-%d-%H-%M-%S-%N).json
+	make -C hpc2018 json | awk 'NR==2' > json/$(shell date +%Y-%m-%d-%H-%M-%S-%N).json
 
 viewer:
 	browse hpc2018/viewer/index.html
