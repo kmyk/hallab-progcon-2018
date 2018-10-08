@@ -44,29 +44,6 @@ packed_oven_t pack_oven(Oven const & oven) {
     }
     return a;
 }
-bool is_used(packed_oven_t const & oven, Vector2i const & p) {
-    return oven[p.y] & (1u << p.x);
-}
-bool is_able_to_put(packed_oven_t const & oven, int width, int height, Vector2i const & p) {
-    assert (0 <= p.y and p.y + height <= Parameter::OvenHeight);
-    assert (0 <= p.x and p.x +  width <= Parameter::OvenWidth);
-    uint32_t mask = ((1u << width) - 1) << p.x;
-    REP3 (y, p.y, p.y + height) {
-        if (oven[y] & mask) return false;
-    }
-    return true;
-}
-bool is_able_to_put(packed_oven_t const & oven, Piece const & piece, Vector2i const & p) {
-    return is_able_to_put(oven, piece.width(), piece.height(), p);
-}
-void bake_piece(packed_oven_t & oven, Piece const & piece, Vector2i const & p) {
-    assert (0 <= p.y and p.y + piece.height() <= Parameter::OvenHeight);
-    assert (0 <= p.x and p.x + piece. width() <= Parameter::OvenWidth);
-    uint32_t mask = ((1u << piece.width()) - 1) << p.x;
-    REP3 (y, p.y, p.y + piece.height()) {
-        oven[y] ^= mask;  // xor
-    }
-}
 
 uint64_t hash_oven(Oven const & oven) {
     constexpr int H = Parameter::OvenHeight;
