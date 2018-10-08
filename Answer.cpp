@@ -151,8 +151,8 @@ public:
         }
 
         // ビームサーチ
-        constexpr int BEAM_DEPTH = 100;
-        constexpr int BEAM_WIDTH = 100;
+        constexpr int BEAM_DEPTH = 30;
+        constexpr int BEAM_WIDTH = 20;
         vector<shared_ptr<state_t> > cur, prv;
         array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
         unordered_set<uint64_t> used_oven;
