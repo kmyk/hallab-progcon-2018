@@ -33,21 +33,32 @@ public:
     Action decide_next_action(Stage const & stage_) {
         // 大きいやつから先に試す
         for (auto lane_type : { CandidateLaneType_Large, CandidateLaneType_Small }) {
+            // 焼き終わらないクッキーを確認
+            vector<bool> is_tle(Parameter::CandidatePieceCount);
+            REP (i, Parameter::CandidatePieceCount) {
+                auto const & piece = stage.candidateLane(lane_type).pieces()[i];
+                if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) {
+                    is_tle[i] = true;
+                }
+            }
 
             // 面積順に整列
             vector<int> order(Parameter::CandidatePieceCount);
             iota(ALL(order), 0);
             sort(ALL(order), [&](int i, int j) {
+                if (is_tle[i] != is_tle[j]) return is_tle[i] < is_tle[j];
                 auto const & p = stage.candidateLane(lane_type).pieces()[i];
                 auto const & q = stage.candidateLane(lane_type).pieces()[j];
                 int a = p.width() * p.height();
                 int b = q.width() * q.height();
+                if (is_tle[i]) return a < b;
                 return a > b;
             });
 
             // 置けそうなら貪欲に置く
             for (int i : order) {
                 auto const & piece = stage.candidateLane(lane_type).pieces()[i];
+                if (is_tle[i] and lane_type == CandidateLaneType_Large) continue;  // 時間切れしてても小さいやつは次のを開けるために置く
                 REP (y, Parameter::OvenHeight) {
                     REP (x, Parameter::OvenWidth) {
                         Vector2i p = (lane_type == CandidateLaneType_Large) ?
