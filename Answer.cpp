@@ -98,7 +98,7 @@ int get_oven_score(Oven const & oven) {
 
 struct state_t {
     Oven oven;
-    vector<Action> actions;
+    vector<pair<int, Action> > actions;
     array<bool, Parameter::CandidatePieceCount> used;
     int turn;
     double score;
@@ -107,7 +107,7 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
     auto b = make_shared<state_t>(*a);
 
     if (not action.isWaiting()) {  // 置く
-        b->actions.push_back(action);
+        b->actions.emplace_back(b->turn, action);
         int i = action.pieceIndex();
         auto piece = stage.candidateLane(action.candidateLaneType()).pieces()[i];
         bool baked = b->oven.tryToBake(&piece, action.putPos());
@@ -126,6 +126,82 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
         b->used[i] = (b->turn + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit);
     }
     return b;
+}
+
+vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
+    constexpr int BEAM_DEPTH = 30;
+    constexpr int BEAM_WIDTH = 20;
+    vector<shared_ptr<state_t> > cur, prv;
+    array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
+    unordered_set<uint64_t> used_oven;
+
+    {  // 初期化
+        auto a = make_shared<state_t>();
+        a->oven = stage.oven();
+        REP (i, Parameter::CandidatePieceCount) {
+            auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+            a->used[i] = (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit);
+        }
+        a->turn = stage.turn();
+        a->score = 0;
+        if (not count(ALL(a->used), false)) {
+            return a->actions;
+        }
+        cur.push_back(a);
+    }
+
+    shared_ptr<state_t> best = cur.front();
+    for (int iteration = 0; iteration < BEAM_DEPTH; ++ iteration) {
+        // 置いてみる
+        cur.swap(prv);
+        cur.clear();
+        for (auto const & a : prv) {
+            REP (i, Parameter::CandidatePieceCount) if (not a->used[i]) {
+                auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+                REP (y, Parameter::OvenHeight) {
+                    REP (x, Parameter::OvenWidth) {
+                        Vector2i p(x, y);
+                        if (a->oven.isAbleToPut(piece, p)) {
+                            auto action = Action::Put(CandidateLaneType_Large, i, p);
+                            cur.push_back(apply_action(a, stage, action));
+                        }
+                    }
+                }
+            }
+        }
+        if (cur.empty()) break;  // まったく置くところないなら終了
+
+        // 並べ替え
+        sort(ALL(cur), [&](shared_ptr<state_t> const & a, shared_ptr<state_t> const & b) {
+            return a->score > b->score;
+        });
+        if (best->score < cur.front()->score) {
+            best = cur.front();
+        }
+
+        // 重複排除
+        cur.swap(prv);
+        cur.clear();
+        for (auto const & a : prv) {
+            uint8_t pieces = 0;
+            REP (i, Parameter::CandidatePieceCount) {
+                if (a->used[i]) pieces |= 1u << i;
+            }
+            if (pieces == -1) continue;
+            if (used_pieces[pieces] >= 10) continue;
+            uint64_t hash = hash_oven(a->oven);
+            if (used_oven.count(hash)) continue;
+            cur.push_back(a);
+            used_pieces[pieces] += 1;
+            used_oven.insert(hash);
+            if (cur.size() >= BEAM_WIDTH) break;
+        }
+        fill(ALL(used_pieces), 0);
+        used_oven.clear();
+    }
+
+    // 結果の取り出し
+    return best->actions;
 }
 
 class solver {
@@ -151,79 +227,10 @@ public:
         }
 
         // ビームサーチ
-        constexpr int BEAM_DEPTH = 30;
-        constexpr int BEAM_WIDTH = 20;
-        vector<shared_ptr<state_t> > cur, prv;
-        array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
-        unordered_set<uint64_t> used_oven;
+        auto actions = do_large_beam_search(stage);
 
-        {  // 初期化
-            auto a = make_shared<state_t>();
-            a->oven = stage.oven();
-            REP (i, Parameter::CandidatePieceCount) {
-                auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-                a->used[i] = (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit);
-            }
-            a->turn = stage.turn();
-            a->score = 0;
-            if (not count(ALL(a->used), false)) return Action::Wait();
-            cur.push_back(a);
-        }
-
-        shared_ptr<state_t> best = cur.front();
-        for (int iteration = 0; iteration < BEAM_DEPTH; ++ iteration) {
-            // 置いてみる
-            cur.swap(prv);
-            cur.clear();
-            for (auto const & a : prv) {
-                REP (i, Parameter::CandidatePieceCount) if (not a->used[i]) {
-                    auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-                    REP (y, Parameter::OvenHeight) {
-                        REP (x, Parameter::OvenWidth) {
-                            Vector2i p(x, y);
-                            if (a->oven.isAbleToPut(piece, p)) {
-                                auto action = Action::Put(CandidateLaneType_Large, i, p);
-                                cur.push_back(apply_action(a, stage, action));
-                            }
-                        }
-                    }
-                }
-            }
-            if (cur.empty()) break;  // まったく置くところないなら終了
-
-            // 並べ替え
-            sort(ALL(cur), [&](shared_ptr<state_t> const & a, shared_ptr<state_t> const & b) {
-                return a->score > b->score;
-            });
-
-            // 重複排除
-            cur.swap(prv);
-            cur.clear();
-            for (auto const & a : prv) {
-                if (not count(ALL(a->used), false)) return a->actions.front();
-                uint8_t pieces = 0;
-                REP (i, Parameter::CandidatePieceCount) {
-                    if (a->used[i]) pieces |= 1u << i;
-                }
-                if (used_pieces[pieces] >= 10) continue;
-                uint64_t hash = hash_oven(a->oven);
-                if (used_oven.count(hash)) continue;
-                cur.push_back(a);
-                used_pieces[pieces] += 1;
-                used_oven.insert(hash);
-                if (cur.size() >= BEAM_WIDTH) break;
-            }
-            fill(ALL(used_pieces), 0);
-            used_oven.clear();
-
-            if (best->score < cur.front()->score) {
-                best = cur.front();
-            }
-        }
-
-        // 結果の取り出し
-        if (best->actions.empty()) return Action::Wait();
-        return best->actions.front();  // たまに実行不能
+        if (actions.empty()) return Action::Wait();
+        return actions.front().second;
     }
 };
 
