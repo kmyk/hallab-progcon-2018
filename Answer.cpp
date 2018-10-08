@@ -169,11 +169,11 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         for (auto const & a : prv) {
             REP (i, Parameter::CandidatePieceCount) if (not a->used[i]) {
                 auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-                REP (y, Parameter::OvenHeight) {
-                    REP (x, Parameter::OvenWidth) {
-                        Vector2i p(x, y);
-                        if (a->oven.isAbleToPut(piece, p)) {
-                            auto action = Action::Put(CandidateLaneType_Large, i, p);
+                REP (y, Parameter::OvenHeight - piece.height() + 1) {
+                    REP (x, Parameter::OvenWidth - piece.width() + 1) {
+                        Vector2i pos(x, y);
+                        if (a->oven.isAbleToPut(piece, pos)) {
+                            auto action = Action::Put(CandidateLaneType_Large, i, pos);
                             cur.push_back(apply_action(a, stage, action));
                         }
                     }
@@ -221,17 +221,17 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
 
     REP (i, Parameter::CandidatePieceCount) {
         auto const & piece = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
-        REP (y, Parameter::OvenHeight) {
-            REP (x, Parameter::OvenWidth) {
-                Vector2i p(x, y);
+        REP (y, Parameter::OvenHeight - piece.height() + 1) {
+            REP (x, Parameter::OvenWidth - piece.width() + 1) {
+                Vector2i pos(x, y);
 
                 // 置けるかどうか確認
-                if (not stage.oven().isAbleToPut(piece, p)) continue;
+                if (not stage.oven().isAbleToPut(piece, pos)) continue;
                 bool conflicted = false;
                 for (auto const & it : actions) {
                     if (stage.turn() + piece.requiredHeatTurnCount() < it.first + 3) break;
                     auto const & action = it.second;
-                    if (is_intersect(p, piece, action.putPos(), get_piece_from_action(stage, action))) {
+                    if (is_intersect(pos, piece, action.putPos(), get_piece_from_action(stage, action))) {
                         conflicted = true;
                         break;
                     }
@@ -239,10 +239,10 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
                 if (conflicted) continue;
 
                 // 置いてみる
-                auto action = Action::Put(CandidateLaneType_Small, i, p);
+                auto action = Action::Put(CandidateLaneType_Small, i, pos);
                 Oven oven = stage.oven();
                 Piece piece1 = piece;
-                bool baked = oven.tryToBake(&piece1, p);
+                bool baked = oven.tryToBake(&piece1, pos);
                 assert (baked);
                 int score = 0;
                 REP (iteration, 5) {
