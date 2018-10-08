@@ -154,7 +154,7 @@ public:
         constexpr int BEAM_DEPTH = 100;
         constexpr int BEAM_WIDTH = 100;
         vector<shared_ptr<state_t> > cur, prv;
-        unordered_map<uint8_t, int> used_pieces;
+        array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
         unordered_set<uint64_t> used_oven;
 
         {  // 初期化
@@ -218,7 +218,7 @@ public:
                 used_oven.insert(hash);
                 if (cur.size() >= BEAM_WIDTH) break;
             }
-            used_pieces.clear();
+            fill(ALL(used_pieces), 0);
             used_oven.clear();
         }
 
