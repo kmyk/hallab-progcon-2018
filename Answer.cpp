@@ -76,7 +76,7 @@ int get_oven_score(Oven const & oven) {
             packed[ly][x] = t;
             packed[ry - 1][x] = t;
         }
-        score += 100 * piece.height() * piece.width();
+        score += 100 * pow(piece.height() * piece.width(), 1.2);
     }
     for (auto const & piece : oven.bakingPieces()) {
         int ly = piece.pos().y;
