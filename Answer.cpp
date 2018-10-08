@@ -170,6 +170,7 @@ public:
             cur.push_back(a);
         }
 
+        shared_ptr<state_t> best = cur.front();
         for (int iteration = 0; iteration < BEAM_DEPTH; ++ iteration) {
             // 置いてみる
             cur.swap(prv);
@@ -188,13 +189,7 @@ public:
                     }
                 }
             }
-
-            // まったく置くところないなら終了
-            if (cur.empty()) {
-                assert (not prv.empty());
-                cur.swap(prv);
-                break;
-            }
+            if (cur.empty()) break;  // まったく置くところないなら終了
 
             // 並べ替え
             sort(ALL(cur), [&](shared_ptr<state_t> const & a, shared_ptr<state_t> const & b) {
@@ -220,11 +215,15 @@ public:
             }
             fill(ALL(used_pieces), 0);
             used_oven.clear();
+
+            if (best->score < cur.front()->score) {
+                best = cur.front();
+            }
         }
 
         // 結果の取り出し
-        if (cur.front()->actions.empty()) return Action::Wait();
-        return cur.front()->actions.front();  // たまに実行不能
+        if (best->actions.empty()) return Action::Wait();
+        return best->actions.front();  // たまに実行不能
     }
 };
 
