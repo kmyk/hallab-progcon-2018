@@ -252,6 +252,10 @@ public:
 };
 
 solver *g_solver = nullptr;
+#ifdef LOCAL
+int g_stage = 0;
+int g_score = 0;
+#endif
 
 
 //------------------------------------------------------------------------------
@@ -274,6 +278,10 @@ Answer::~Answer()
 /// @param aStage 現在のステージ。
 void Answer::init(const Stage& aStage)
 {
+#ifdef LOCAL
+    cerr << "[*] stage = " << (++ g_stage) << endl;
+    g_score = 0;
+#endif
     g_solver = new solver(aStage);
 }
 
@@ -285,6 +293,14 @@ void Answer::init(const Stage& aStage)
 /// @param aStage 現在のステージ。
 Action Answer::decideNextAction(const Stage& aStage)
 {
+#ifdef LOCAL
+    for (auto const & piece : aStage.oven().lastBakedPieces()) {
+        g_score += piece.score();
+    }
+    if (aStage.turn() <= 5 or aStage.turn() % 50 == 0 or aStage.turn() >= 998) {
+        cerr << "[*] turn = " << aStage.turn() << ": score = " << g_score << endl;
+    }
+#endif
     return g_solver->decide_next_action(aStage);
 }
 
