@@ -103,16 +103,26 @@ struct state_t {
     int turn;
     double score;
 };
+
+Piece const & get_piece_from_action(Stage const & stage, Action const & action) {
+    return stage.candidateLane(action.candidateLaneType()).pieces()[action.pieceIndex()];
+}
+
+bool is_intersect(Vector2i const & pos1, Piece const & piece1, Vector2i const & pos2, Piece const & piece2) {
+    return Util::IsIntersect(
+        pos1, piece1.width(), piece1.height(),
+        pos2, piece2.width(), piece2.height());
+}
+
 shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & stage, Action const & action) {
     auto b = make_shared<state_t>(*a);
 
     if (not action.isWaiting()) {  // 置く
         b->actions.emplace_back(b->turn, action);
-        int i = action.pieceIndex();
-        auto piece = stage.candidateLane(action.candidateLaneType()).pieces()[i];
+        Piece piece = get_piece_from_action(stage, action);
         bool baked = b->oven.tryToBake(&piece, action.putPos());
         assert (baked);
-        b->used[i] = true;
+        b->used[action.pieceIndex()] = true;
     }
 
     // 進める
@@ -127,6 +137,7 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
     }
     return b;
 }
+
 
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
     constexpr int BEAM_DEPTH = 30;
@@ -204,6 +215,51 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
     return best->actions;
 }
 
+Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & actions) {
+    Action best_action = Action::Wait();
+    int best_score = INT_MIN;
+
+    REP (i, Parameter::CandidatePieceCount) {
+        auto const & piece = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
+        REP (y, Parameter::OvenHeight) {
+            REP (x, Parameter::OvenWidth) {
+                Vector2i p(x, y);
+
+                // 置けるかどうか確認
+                if (not stage.oven().isAbleToPut(piece, p)) continue;
+                bool conflicted = false;
+                for (auto const & it : actions) {
+                    if (stage.turn() + piece.requiredHeatTurnCount() < it.first + 3) break;
+                    auto const & action = it.second;
+                    if (is_intersect(p, piece, action.putPos(), get_piece_from_action(stage, action))) {
+                        conflicted = true;
+                        break;
+                    }
+                }
+                if (conflicted) continue;
+
+                // 置いてみる
+                auto action = Action::Put(CandidateLaneType_Small, i, p);
+                Oven oven = stage.oven();
+                Piece piece1 = piece;
+                bool baked = oven.tryToBake(&piece1, p);
+                assert (baked);
+                int score = 0;
+                REP (iteration, 5) {
+                    oven.bakeAndDiscard();
+                    score += get_oven_score(oven);
+                }
+                if (best_score < score) {
+                    best_score = score;
+                    best_action = action;
+                }
+            }
+        }
+    }
+
+    return best_action;
+}
+
 class solver {
     packed_oven_t last_oven;
 
@@ -226,11 +282,17 @@ public:
             last_oven = packed_oven;
         }
 
-        // ビームサーチ
+        // 大型クッキーについてビームサーチ
         auto actions = do_large_beam_search(stage);
+        if (not actions.empty() and actions.front().first == stage.turn()) {
+            return actions.front().second;
+        }
 
-        if (actions.empty()) return Action::Wait();
-        return actions.front().second;
+        // 小型クッキーは貪欲
+        auto action = do_small_greedy(stage, actions);
+        if (not action.isWaiting()) return action;
+
+        return Action::Wait();
     }
 };
 
