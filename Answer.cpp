@@ -287,6 +287,27 @@ public:
             last_oven = packed_oven;
         }
 
+        // 置けるやつがひとつもないなら省略
+        bool is_puttable = ([&]() {
+            for (auto lane_type : { CandidateLaneType_Large, CandidateLaneType_Small }) {
+                REP (i, Parameter::CandidatePieceCount) {
+                    auto const & piece = stage.candidateLane(lane_type).pieces()[i];
+                    REP (y, Parameter::OvenHeight - piece.height() + 1) {
+                        REP (x, Parameter::OvenWidth - piece.width() + 1) {
+                            Vector2i pos(x, y);
+                            if (stage.oven().isAbleToPut(piece, pos)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        })();
+        if (not is_puttable) {
+            return Action::Wait();
+        }
+
         // 大型クッキーについてビームサーチ
         auto actions = do_large_beam_search(stage);
         if (not actions.empty() and actions.front().first == stage.turn()) {
