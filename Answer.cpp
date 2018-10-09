@@ -60,23 +60,21 @@ uint64_t hash_oven(Oven const & oven) {
 int get_oven_score(Oven const & oven) {
     constexpr int H = Parameter::OvenHeight;
     constexpr int W = Parameter::OvenWidth;
-    array<array<int, W>, H> packed = {};
+    array<array<int16_t, W>, H> packed = {};
     int score = 0;
     for (auto const & piece : oven.bakingPieces()) {
         int ly = piece.pos().y;
         int lx = piece.pos().x;
         int ry = ly + piece.height();
         int rx = lx + piece.width();
-        int t = piece.restRequiredHeatTurnCount();
+        int16_t t = piece.restRequiredHeatTurnCount();
         assert (t >= 1);
-        REP3 (y, ly, ry) {
-            packed[y][lx] = t;
-            packed[y][rx - 1] = t;
-        }
-        REP3 (x, lx, rx) {
-            packed[ly][x] = t;
-            packed[ry - 1][x] = t;
-        }
+        REP3 (y, ly, ry) packed[y][lx] = t;
+        REP3 (x, lx, rx) packed[ly][x] = t;
+        if (ly == 0) score += t * (rx - lx);
+        if (ry == H) score += t * (rx - lx);
+        if (lx == 0) score += t * (ry - ly);
+        if (rx == W) score += t * (ry - ly);
         score += 100 * pow(piece.height() * piece.width(), 1.2);
     }
     for (auto const & piece : oven.bakingPieces()) {
@@ -84,14 +82,12 @@ int get_oven_score(Oven const & oven) {
         int lx = piece.pos().x;
         int ry = ly + piece.height();
         int rx = lx + piece.width();
-        int t = piece.restRequiredHeatTurnCount();
-        REP3 (y, ly, ry) {
-            if (lx - 1 >= 0 and not packed[y][lx - 1]) score -= t;
-            if (rx < W) score -= abs(packed[y][rx] - t);
+        int16_t t = piece.restRequiredHeatTurnCount();
+        if (rx < W) REP3 (y, ly, ry) {
+            score += min(packed[y][rx], t);
         }
-        REP3 (x, lx, rx) {
-            if (ly - 1 >= 0 and not packed[ly - 1][x]) score -= t;
-            if (ry < H) score -= abs(packed[ry][x] - t);
+        if (ry < H) REP3 (x, lx, rx) {
+            score += min(packed[ry][x], t);
         }
     }
     return score;
