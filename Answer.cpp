@@ -68,6 +68,7 @@ int get_oven_score(Oven const & oven) {
         int ry = ly + piece.height();
         int rx = lx + piece.width();
         int t = piece.restRequiredHeatTurnCount();
+        assert (t >= 1);
         REP3 (y, ly, ry) {
             packed[y][lx] = t;
             packed[y][rx - 1] = t;
@@ -85,12 +86,12 @@ int get_oven_score(Oven const & oven) {
         int rx = lx + piece.width();
         int t = piece.restRequiredHeatTurnCount();
         REP3 (y, ly, ry) {
-            if (lx - 1 >= 0) score -= abs(packed[y][lx - 1] - t);
-            if (rx     <  W) score -= abs(packed[y][rx    ] - t);
+            if (lx - 1 >= 0 and not packed[y][lx - 1]) score -= t;
+            if (rx < W) score -= abs(packed[y][rx] - t);
         }
         REP3 (x, lx, rx) {
-            if (ly - 1 >= 0) score -= abs(packed[ly - 1][x] - t);
-            if (ry     <  H) score -= abs(packed[ry    ][x] - t);
+            if (ly - 1 >= 0 and not packed[ly - 1][x]) score -= t;
+            if (ry < H) score -= abs(packed[ry][x] - t);
         }
     }
     return score;
