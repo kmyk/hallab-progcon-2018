@@ -143,40 +143,25 @@ template <typename Func>
 void iterate_all_puttable_pos(Oven const & oven, Piece const & piece, Func func) {
     constexpr int H = Parameter::OvenHeight;
     constexpr int W = Parameter::OvenWidth;
-    array<uint32_t, H> used = {};
-    if (piece.width() > piece.height()) {
-        REP (y, H - piece.height() + 1) {
-            for (int x = 0; x < W - piece.width() + 1; ++ x) {
-                Vector2i pos(x, y);
-                for (auto const & baking : oven.bakingPieces()) {
-                    if (is_intersect(pos, piece, baking.pos(), baking)) {
-                        x = baking.pos().x + baking.width() - 1;
-                        goto next_x;
-                    }
-                }
-                used[y] |= 1u << x;
-next_x: ;
-            }
-        }
-    } else {
-        REP (x, H - piece.width() + 1) {
-            for (int y = 0; y < W - piece.height() + 1; ++ y) {
-                Vector2i pos(x, y);
-                for (auto const & baking : oven.bakingPieces()) {
-                    if (is_intersect(pos, piece, baking.pos(), baking)) {
-                        y = baking.pos().y + baking.height() - 1;
-                        goto next_y;
-                    }
-                }
-                used[y] |= 1u << x;
-next_y: ;
-            }
-        }
+    array<array<char, W + 1>, H + 1> imos = {};
+    for (auto const & baking : oven.bakingPieces()) {
+        int ly = baking.pos().y;
+        int lx = baking.pos().x;
+        int ry = ly + baking.height();
+        int rx = lx + baking.width();
+        ly = max(0, ly - piece.height() + 1);
+        lx = max(0, lx - piece.width() + 1);
+        imos[ly][lx] += 1;
+        imos[ly][rx] -= 1;
+        imos[ry][lx] -= 1;
+        imos[ry][rx] += 1;
     }
-    // 呼び出すのは常に同じ順番でやる
     REP (y, H - piece.height() + 1) {
         REP (x, H - piece.width() + 1) {
-            if (used[y] & (1u << x)) {
+            imos[y    ][x + 1] += imos[y][x];
+            imos[y + 1][x    ] += imos[y][x];
+            imos[y + 1][x + 1] -= imos[y][x];
+            if (not imos[y][x]) {
                 func(Vector2i(x, y));
             }
         }
