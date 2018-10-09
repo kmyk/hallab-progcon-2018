@@ -168,8 +168,8 @@ void iterate_all_puttable_pos(Oven const & oven, Piece const & piece, Func func)
 }
 
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
-    constexpr int BEAM_DEPTH = 6;
-    constexpr int BEAM_WIDTH = 10;
+    constexpr int BEAM_DEPTH = 10;
+    constexpr int BEAM_WIDTH = 7;
     vector<shared_ptr<state_t> > cur, prv;
     array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
     unordered_set<uint64_t> used_oven;
@@ -198,17 +198,13 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         cur.swap(prv);
         cur.clear();
         for (auto const & a : prv) {
-            bool put = false;
+            cur.push_back(apply_action(a, stage, Action::Wait()));
             REP (i, Parameter::CandidatePieceCount) if (not (a->used & (1u << i))) {
                 auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
                 iterate_all_puttable_pos(a->oven, piece, [&](Vector2i const & pos) {
                     auto action = Action::Put(CandidateLaneType_Large, i, pos);
                     cur.push_back(apply_action(a, stage, action));
-                    put = true;
                 });
-            }
-            if (not put) {
-                cur.push_back(apply_action(a, stage, Action::Wait()));
             }
         }
 
