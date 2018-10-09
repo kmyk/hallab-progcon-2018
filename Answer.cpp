@@ -75,7 +75,7 @@ int get_oven_score(Oven const & oven) {
         if (ry == H) score += t * (rx - lx);
         if (lx == 0) score += t * (ry - ly);
         if (rx == W) score += t * (ry - ly);
-        score += 100 * pow(piece.height() * piece.width(), 1.2);
+        score += 10 * piece.height() * piece.width();
     }
     for (auto const & piece : oven.bakingPieces()) {
         int ly = piece.pos().y;
@@ -120,6 +120,7 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
         bool baked = b->oven.tryToBake(&piece, action.putPos());
         assert (baked);
         b->used |= 1u << action.pieceIndex();
+        b->score += 100 * pow(piece.height() * piece.width(), 1.5);
     }
 
     // 進める
