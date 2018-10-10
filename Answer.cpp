@@ -247,7 +247,7 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
 
             // 大型クッキーの予定と整合するか確認
             for (auto const & it : actions) {
-                if (stage.turn() + piece.requiredHeatTurnCount() < it.first + 3) break;
+                if (stage.turn() + piece.requiredHeatTurnCount() < it.first) break;
                 auto const & action = it.second;
                 if (is_intersect(pos, piece, action.putPos(), get_piece_from_action(stage, action))) {
                     return;
