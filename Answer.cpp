@@ -23,6 +23,7 @@
 #define REP_R(i, n) for (int i = int(n) - 1; (i) >= 0; -- (i))
 #define REP3R(i, m, n) for (int i = int(n) - 1; (i) >= (int)(m); -- (i))
 #define ALL(x) begin(x), end(x)
+typedef long long ll;
 template <class T, class U> inline void chmax(T & a, U const & b) { a = std::max<T>(a, b); }
 template <class T, class U> inline void chmin(T & a, U const & b) { a = std::min<T>(a, b); }
 
@@ -48,6 +49,18 @@ packed_oven_t pack_oven(Oven const & oven) {
 uint64_t hash_oven(Oven const & oven) {
     constexpr int H = Parameter::OvenHeight;
     constexpr int W = Parameter::OvenWidth;
+#ifdef LOCAL
+    // デバッグの都合で bitset を避けたい
+    string s(H * W / CHAR_BIT, '\0');
+    REP (y, H) REP (x, W) {
+        if (oven.isAbleToPut(1, 1, Vector2i(x, y))) {
+            int z = y * W + x;
+            s[z / 8] |= 1u << (z % 8);
+        }
+    }
+    return hash<string>()(s);
+#else
+    // ちょっとだけ速い気がする
     bitset<H * W> packed;
     REP (y, H) REP (x, W) {
         if (oven.isAbleToPut(1, 1, Vector2i(x, y))) {
@@ -55,6 +68,7 @@ uint64_t hash_oven(Oven const & oven) {
         }
     }
     return hash<bitset<H * W> >()(packed);
+#endif
 }
 
 int get_oven_score(Oven const & oven) {
@@ -98,7 +112,7 @@ struct state_t {
     vector<pair<int, Action> > actions;
     uint8_t used;
     int turn;
-    double score;
+    ll score;
 };
 
 Piece const & get_piece_from_action(Stage const & stage, Action const & action) {
@@ -220,7 +234,6 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         cur.swap(prv);
         cur.clear();
         for (auto const & a : prv) {
-            if (a->used == 0xff) continue;
             if (used_pieces[a->used] >= 2) continue;
             uint64_t hash = hash_oven(a->oven);
             if (used_oven.count(hash)) continue;
