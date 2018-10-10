@@ -173,9 +173,21 @@ void iterate_all_puttable_pos(Oven const & oven, Piece const & piece, Func func)
     }
 }
 
+bool operator == (Action const & a, Action const & b) {
+    if (a.isWaiting() or b.isWaiting()) {
+        return a.isWaiting() == b.isWaiting();
+    } else {
+        return make_tuple(a.candidateLaneType(), a.pieceIndex(), a.putPos())
+            == make_tuple(b.candidateLaneType(), b.pieceIndex(), b.putPos());
+    }
+}
+bool operator != (Action const & a, Action const & b) {
+    return not (a == b);
+}
+
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
-    constexpr int BEAM_DEPTH = 10;
-    constexpr int BEAM_WIDTH = 7;
+    constexpr int BEAM_DEPTH = 13;
+    constexpr int BEAM_WIDTH = 9;
     vector<shared_ptr<state_t> > cur, prv;
     array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
     unordered_set<uint64_t> used_oven;
@@ -225,17 +237,33 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         // 重複排除
         cur.swap(prv);
         cur.clear();
+        int beam_width = max(3, BEAM_WIDTH - iteration);
         for (auto const & a : prv) {
-            if (used_pieces[a->used] >= 2) continue;
+            if (used_pieces[a->used] >= (beam_width >= 4 ? 2 : 1)) continue;
             uint64_t hash = hash_oven(a->oven);
             if (used_oven.count(hash)) continue;
             cur.push_back(a);
             used_pieces[a->used] += 1;
             used_oven.insert(hash);
-            if (cur.size() >= BEAM_WIDTH) break;
+            if (cur.size() >= beam_width) break;
         }
         fill(ALL(used_pieces), 0);
         used_oven.clear();
+
+        // 結果が確定してたら打ち切り
+        if (not best->actions.empty() and best->actions.front().first == stage.turn()) {
+            auto action = best->actions.front().second;
+            bool all_same = true;
+            for (auto const & a : cur) {
+                if (a->actions.empty() or a->actions.front().second != action) {
+                    all_same = false;
+                    break;
+                }
+            }
+            if (all_same) {
+                break;
+            }
+        }
     }
 
     // 結果の取り出し
