@@ -99,12 +99,26 @@ int get_oven_score(Oven const & oven) {
     return score;
 }
 
+struct piece_index_map_t {
+    array<int, Parameter::CandidatePieceCount> given_to_local;
+    piece_index_map_t() {
+        iota(ALL(given_to_local), 0);
+    }
+    void use(int i) {
+        rotate(given_to_local.begin() + i, given_to_local.begin() + (i + 1), given_to_local.end());
+    }
+};
+
 struct state_t {
     Oven oven;
-    vector<pair<int, Action> > actions;
+    Action action;
     uint8_t used;
+    uint8_t opened;
     int turn;
     ll score;
+    weak_ptr<state_t> parent;
+    shared_ptr<state_t> wait;
+    vector<shared_ptr<state_t> > put;
 };
 
 Piece const & get_piece_from_action(Stage const & stage, Action const & action) {
@@ -117,11 +131,42 @@ bool is_intersect(Vector2i const & pos1, Piece const & piece1, Vector2i const & 
         pos2, piece2.width(), piece2.height());
 }
 
-shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & stage, Action const & action) {
-    auto b = make_shared<state_t>(*a);
+shared_ptr<state_t> new_initial_state(Stage const & stage) {
+    auto a = make_shared<state_t>();
+    a->oven = stage.oven();
+    a->action = Action::Wait();
+    a->used = 0;
+    a->opened = 0;
+    REP (i, Parameter::CandidatePieceCount) {
+        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) {
+            a->used |= 1u << i;
+        }
+    }
+    a->turn = stage.turn();
+    a->score = 0;
+    return a;
+}
+
+shared_ptr<state_t> new_next_state(shared_ptr<state_t> const & a, Stage const & stage, Action const & action) {
+    auto b = make_shared<state_t>();
+    b->oven = a->oven;
+    b->action = action;
+    b->used = a->used;
+    a->opened = 0;
+    b->turn = a->turn + 1;
+    b->score = a->score;
+
+    // 紐付ける
+    b->parent = a;
+    if (action.isWaiting()) {
+        assert (not a->wait);
+        a->wait = b;
+    } else {
+        a->put.push_back(b);
+    }
 
     if (not action.isWaiting()) {  // 置く
-        b->actions.emplace_back(b->turn, action);
         Piece piece = get_piece_from_action(stage, action);
         bool baked = b->oven.tryToBake(&piece, action.putPos());
         assert (baked);
@@ -130,7 +175,6 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
     }
 
     // 進める
-    b->turn += 1;
     b->oven.bakeAndDiscard();
     b->score += get_oven_score(b->oven);
 
@@ -141,7 +185,38 @@ shared_ptr<state_t> apply_action(shared_ptr<state_t> const & a, Stage const & st
             b->used |= 1u << i;
         }
     }
+
     return b;
+}
+
+shared_ptr<state_t> get_wait_state(shared_ptr<state_t> const & a, Stage const & stage) {
+    if (a->wait) {
+        return a->wait;
+    } else {
+        return new_next_state(a, stage, Action::Wait());
+    }
+}
+
+vector<pair<int, Action> > get_actions_between(shared_ptr<state_t> const & root, shared_ptr<state_t> it) {
+    vector<pair<int, Action> > actions;
+    while (it != root) {
+        if (not it->action.isWaiting()) {
+            actions.emplace_back(it->turn - 1, it->action);
+        }
+        it = it->parent.lock();
+    }
+    reverse(ALL(actions));
+    return actions;
+}
+
+shared_ptr<state_t> get_direct_descendant(shared_ptr<state_t> const & root, shared_ptr<state_t> it) {
+    assert (it != root);
+    assert (it->parent.lock());
+    while (it->parent.lock() != root) {
+        it = it->parent.lock();
+        assert (it->parent.lock());
+    }
+    return it;
 }
 
 template <typename Func>
@@ -173,44 +248,31 @@ void iterate_all_puttable_pos(Oven const & oven, Piece const & piece, Func func)
     }
 }
 
-vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
+shared_ptr<state_t> do_large_beam_search(Stage const & stage, shared_ptr<state_t> const & root, piece_index_map_t const & piece_index_map) {
     constexpr int BEAM_DEPTH = 10;
     constexpr int BEAM_WIDTH = 7;
     vector<shared_ptr<state_t> > cur, prv;
     array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
     unordered_set<uint64_t> used_oven;
 
-    {  // 初期化
-        auto a = make_shared<state_t>();
-        a->oven = stage.oven();
-        a->used = 0;
-        REP (i, Parameter::CandidatePieceCount) {
-            auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-            if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) {
-                a->used |= 1u << i;
-            }
-        }
-        a->turn = stage.turn();
-        a->score = 0;
-        if (a->used == 0xff) {
-            return a->actions;
-        }
-        cur.push_back(a);
-    }
-
-    shared_ptr<state_t> best = cur.front();
+    cur.push_back(root);
+    shared_ptr<state_t> best = get_wait_state(root, stage);
     for (int iteration = 0; iteration < BEAM_DEPTH; ++ iteration) {
         // 置いてみる
         cur.swap(prv);
         cur.clear();
         for (auto const & a : prv) {
-            cur.push_back(apply_action(a, stage, Action::Wait()));
-            REP (i, Parameter::CandidatePieceCount) if (not (a->used & (1u << i))) {
+            cur.push_back(get_wait_state(a, stage));
+            REP (i, Parameter::CandidatePieceCount) if (not ((a->used | a->opened) & (1u << piece_index_map.given_to_local[i]))) {
+                a->opened |= 1u << piece_index_map.given_to_local[i];
                 auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
                 iterate_all_puttable_pos(a->oven, piece, [&](Vector2i const & pos) {
                     auto action = Action::Put(CandidateLaneType_Large, i, pos);
-                    cur.push_back(apply_action(a, stage, action));
+                    new_next_state(a, stage, action);
                 });
+            }
+            for (auto b : a->put) {
+                cur.push_back(b);
             }
         }
 
@@ -238,8 +300,7 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         used_oven.clear();
     }
 
-    // 結果の取り出し
-    return best->actions;
+    return best;
 }
 
 Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & actions) {
@@ -281,6 +342,8 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
 }
 
 class solver {
+    shared_ptr<state_t> state;
+    piece_index_map_t piece_index_map;
     packed_oven_t last_oven;
 
 public:
@@ -293,10 +356,15 @@ public:
     Action decide_next_action(Stage const & stage_) {
         assert (&stage == &stage_);
 
+        if (not state) {
+            state = new_initial_state(stage);
+        }
+
         // 状況が変わってないなら省略
         if (not stage_.oven().isEmpty()) {
             auto packed_oven = pack_oven(stage_.oven());
             if (packed_oven == last_oven) {
+                state = get_wait_state(state, stage);
                 return Action::Wait();
             }
             last_oven = packed_oven;
@@ -314,19 +382,27 @@ public:
             }
         }
         if (not is_puttable) {
+            state = get_wait_state(state, stage);
             return Action::Wait();
         }
 
         // 大型クッキーについてビームサーチ
-        auto actions = do_large_beam_search(stage);
+        auto desc_state = do_large_beam_search(stage, state, piece_index_map);
+        auto actions = get_actions_between(state, desc_state);
         if (not actions.empty() and actions.front().first == stage.turn()) {
+            state = get_direct_descendant(state, desc_state);
+            piece_index_map.use(actions.front().second.pieceIndex());
             return actions.front().second;
         }
 
         // 小型クッキーは貪欲
         auto action = do_small_greedy(stage, actions);
-        if (not action.isWaiting()) return action;
+        if (not action.isWaiting()) {
+            state = nullptr;  // 破棄
+            return action;
+        }
 
+        state = get_wait_state(state, stage);
         return Action::Wait();
     }
 };
