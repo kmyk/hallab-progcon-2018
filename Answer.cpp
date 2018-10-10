@@ -1,12 +1,4 @@
-﻿//------------------------------------------------------------------------------
-/// @file
-/// @author   ハル研究所プログラミングコンテスト実行委員会
-///
-/// @copyright  Copyright (c) 2018 HAL Laboratory, Inc.
-/// @attention  このファイルの利用は、同梱のREADMEにある
-///             利用条件に従ってください。
-//------------------------------------------------------------------------------
-#include <algorithm>
+﻿#include <algorithm>
 #include <bitset>
 #include <cassert>
 #include <climits>
