@@ -243,12 +243,19 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
 }
 
 Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & actions) {
-    Action best_action = Action::Wait();
-    int best_score = INT_MIN;
-
-    REP (i, Parameter::CandidatePieceCount) {
+    array<int, Parameter::CandidatePieceCount> order;
+    iota(ALL(order), 0);
+    sort(ALL(order), [&](int i, int j) {
+        auto const & p = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
+        auto const & q = stage.candidateLane(CandidateLaneType_Small).pieces()[j];
+        return p.height() * p.width() > q.height() * q.width();
+    });
+    for (int i : order) {
         auto const & piece = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
+        bool found = false;
+        Vector2i found_pos;
         iterate_all_puttable_pos(stage.oven(), piece, [&](Vector2i const & pos) {
+            if (found) return;
 
             // 大型クッキーの予定と整合するか確認
             for (auto const & it : actions) {
@@ -259,25 +266,16 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
                 }
             }
 
-            // 置いてみる
-            auto action = Action::Put(CandidateLaneType_Small, i, pos);
-            Oven oven = stage.oven();
-            Piece piece1 = piece;
-            bool baked = oven.tryToBake(&piece1, pos);
-            assert (baked);
-            int score = 0;
-            REP (iteration, 5) {
-                oven.bakeAndDiscard();
-                score += get_oven_score(oven);
-            }
-            if (best_score < score) {
-                best_score = score;
-                best_action = action;
-            }
+            found = true;
+            found_pos = pos;
         });
+
+        if (found) {
+            return Action::Put(CandidateLaneType_Small, i, found_pos);
+        }
     }
 
-    return best_action;
+    return Action::Wait();
 }
 
 class solver {
