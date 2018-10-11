@@ -63,41 +63,105 @@ uint64_t hash_oven(Oven const & oven) {
 #endif
 }
 
-int get_oven_score(Oven const & oven) {
-    constexpr int H = Parameter::OvenHeight;
-    constexpr int W = Parameter::OvenWidth;
-    array<array<int16_t, W>, H> packed = {};
-    int score = 0;
-    for (auto const & piece : oven.bakingPieces()) {
-        int ly = piece.pos().y;
-        int lx = piece.pos().x;
-        int ry = ly + piece.height();
-        int rx = lx + piece.width();
-        int16_t t = piece.restRequiredHeatTurnCount();
-        assert (t >= 1);
-        REP3 (y, ly, ry) packed[y][lx] = t;
-        REP3 (x, lx, rx) packed[ly][x] = t;
-        if (ly == 0) score += t * (rx - lx);
-        if (ry == H) score += t * (rx - lx);
-        if (lx == 0) score += t * (ry - ly);
-        if (rx == W) score += t * (ry - ly);
-        score += 10 * piece.height() * piece.width();
-    }
-    for (auto const & piece : oven.bakingPieces()) {
-        int ly = piece.pos().y;
-        int lx = piece.pos().x;
-        int ry = ly + piece.height();
-        int rx = lx + piece.width();
-        int16_t t = piece.restRequiredHeatTurnCount();
-        if (rx < W) REP3 (y, ly, ry) {
-            score += min(packed[y][rx], t);
-        }
-        if (ry < H) REP3 (x, lx, rx) {
-            score += min(packed[ry][x], t);
-        }
-    }
-    return score;
+ostream & operator << (ostream & out, Vector2i const & pos) {
+    return out << "(" << pos.x << ", " << pos.y << ")";
 }
+ostream & operator << (ostream & out, Action const & action) {
+    if (action.isWaiting()) {
+        return out << "Wait()";
+    } else {
+        const char *lane_type = (action.candidateLaneType() == CandidateLaneType_Small ? "Small" : "Large");
+        return out << "Put(" << lane_type << ", " << action.pieceIndex() << ", " << action.putPos() << ")";
+    }
+}
+ostream & operator << (ostream & out, Piece const & piece) {
+    return out << "Piece(w = " << piece.width() << ", h = " << piece.height()
+        // << ", t = " << piece.currentHeatTurnCount() << "/" << piece.requiredHeatTurnCount() << ")";
+        << ", t = " << piece.restRequiredHeatTurnCount() << ")";
+}
+ostream & operator << (ostream & out, Oven const & oven) {
+    out << "Oven({ ";
+    for (auto const & piece : oven.bakingPieces()) {
+        out << piece.pos() << ": " << piece << ", ";
+    }
+    return out << "})";
+}
+
+class oven_score_calculator {
+    static constexpr int H = Parameter::OvenHeight;
+    static constexpr int W = Parameter::OvenWidth;
+    Oven const & oven;
+    array<array<int16_t, W>, H> packed;
+    int score;
+
+public:
+    oven_score_calculator(Oven const & oven_)
+            : oven(oven_),
+              packed(),
+              score() {
+        for (auto const & piece : oven.bakingPieces()) {
+            int ly = piece.pos().y;
+            int lx = piece.pos().x;
+            int ry = ly + piece.height();
+            int rx = lx + piece.width();
+            int16_t t = piece.restRequiredHeatTurnCount() - 1;
+            if (t <= 0) continue;
+            assert (t >= 1);
+            REP3 (y, ly, ry) {
+                packed[y][lx] = t;
+                packed[y][rx - 1] = t;
+            }
+            REP3 (x, lx, rx) {
+                packed[ly][x] = t;
+                packed[ry - 1][x] = t;
+            }
+            if (ly == 0) score += t * (rx - lx);
+            if (ry == H) score += t * (rx - lx);
+            if (lx == 0) score += t * (ry - ly);
+            if (rx == W) score += t * (ry - ly);
+            score += 10 * piece.height() * piece.width();
+        }
+        for (auto const & piece : oven.bakingPieces()) {
+            int ly = piece.pos().y;
+            int lx = piece.pos().x;
+            int ry = ly + piece.height();
+            int rx = lx + piece.width();
+            int16_t t = piece.restRequiredHeatTurnCount() - 1;
+            if (t <= 0) continue;
+            assert (t >= 1);
+            if (rx < W) REP3 (y, ly, ry) {
+                score += min(packed[y][rx], t);
+            }
+            if (ry < H) REP3 (x, lx, rx) {
+                score += min(packed[ry][x], t);
+            }
+        }
+    }
+
+    int wait() const {
+        return score;
+    }
+
+    int put(Piece const & piece, Vector2i const & pos) const {
+        int ly = pos.y;
+        int lx = pos.x;
+        int ry = ly + piece.height();
+        int rx = lx + piece.width();
+        int16_t t = piece.requiredHeatTurnCount() - 1;
+        assert (t >= 0);
+        int delta = 0;
+        if (ly == 0) delta += t * (rx - lx);
+        if (ry == H) delta += t * (rx - lx);
+        if (lx == 0) delta += t * (ry - ly);
+        if (rx == W) delta += t * (ry - ly);
+        delta += 10 * piece.height() * piece.width();
+        if (lx - 1 >= 0) REP3 (y, ly, ry) delta += min(packed[y][lx - 1], t);
+        if (ly - 1 >= 0) REP3 (x, lx, rx) delta += min(packed[ly - 1][x], t);
+        if (rx < W) REP3 (y, ly, ry) delta += min(packed[y][rx], t);
+        if (ry < H) REP3 (x, lx, rx) delta += min(packed[ry][x], t);
+        return score + delta;
+    }
+};
 
 struct state_t {
     Oven oven;
@@ -132,22 +196,24 @@ shared_ptr<state_t> new_initial_state(Stage const & stage) {
     return a;
 }
 
-shared_ptr<state_t> new_next_state(shared_ptr<state_t> const & a, Stage const & stage, Action const & action) {
+shared_ptr<state_t> new_next_state(shared_ptr<state_t> const & a, Stage const & stage, Action const & action, oven_score_calculator const & calculator) {
     auto b = make_shared<state_t>(*a);
 
-    if (not action.isWaiting()) {  // 置く
+    if (action.isWaiting()) {  // 待つ
+        b->score += calculator.wait();
+    } else {  // 置く
         b->actions.emplace_back(b->turn, action);
         Piece piece = get_piece_from_action(stage, action);
         bool baked = b->oven.tryToBake(&piece, action.putPos());
         assert (baked);
         b->used |= 1u << action.pieceIndex();
         b->score += 100 * pow(piece.height() * piece.width(), 1.5);
+        b->score += calculator.put(piece, action.putPos());
     }
 
     // 進める
     b->turn += 1;
     b->oven.bakeAndDiscard();
-    b->score += get_oven_score(b->oven);
 
     // 腐らせる
     REP (i, Parameter::CandidatePieceCount) if (not (b->used & (1u << i))) {
@@ -214,12 +280,13 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         cur.swap(prv);
         cur.clear();
         for (auto const & a : prv) {
-            cur.push_back(new_next_state(a, stage, Action::Wait()));
+            oven_score_calculator calculator(a->oven);
+            cur.push_back(new_next_state(a, stage, Action::Wait(), calculator));
             REP (i, Parameter::CandidatePieceCount) if (not (a->used & (1u << i))) {
                 auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
                 iterate_all_puttable_pos(a->oven, piece, [&](Vector2i const & pos) {
                     auto action = Action::Put(CandidateLaneType_Large, i, pos);
-                    cur.push_back(new_next_state(a, stage, action));
+                    cur.push_back(new_next_state(a, stage, action, calculator));
                 });
             }
         }
