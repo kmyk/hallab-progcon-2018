@@ -188,9 +188,9 @@ bool operator != (Action const & a, Action const & b) {
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
     constexpr int BEAM_DEPTH = 13;
     constexpr int BEAM_WIDTH = 9;
-    vector<shared_ptr<state_t> > cur, prv;
-    array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
-    unordered_set<uint64_t> used_oven;
+    static vector<shared_ptr<state_t> > cur, prv;
+    static array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
+    static unordered_set<uint64_t> used_oven;
 
     {  // 初期化
         auto a = make_shared<state_t>();
@@ -265,6 +265,8 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
             }
         }
     }
+    cur.clear();
+    prv.clear();
 
     // 結果の取り出し
     return best->actions;
