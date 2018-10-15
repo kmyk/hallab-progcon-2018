@@ -202,7 +202,7 @@ bool operator != (Action const & a, Action const & b) {
 
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
     constexpr int BEAM_DEPTH = 13;
-    constexpr int BEAM_WIDTH = 9;
+    constexpr int BEAM_WIDTH = 5;
     static vector<shared_ptr<state_t> > cur, prv;
     static array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
     static unordered_set<uint64_t> used_oven;
@@ -235,15 +235,14 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
         // 重複排除
         cur.swap(prv);
         cur.clear();
-        int beam_width = max(3, BEAM_WIDTH - iteration);
         for (auto const & a : prv) {
-            if (used_pieces[a->used] >= (beam_width >= 4 ? 2 : 1)) continue;
+            if (used_pieces[a->used] >= 2) continue;
             uint64_t hash = hash_oven(a->oven);
             if (used_oven.count(hash)) continue;
             cur.push_back(a);
             used_pieces[a->used] += 1;
             used_oven.insert(hash);
-            if ((int)cur.size() >= beam_width) break;
+            if ((int)cur.size() >= BEAM_WIDTH) break;
         }
         fill(ALL(used_pieces), 0);
         used_oven.clear();
