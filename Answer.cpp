@@ -177,7 +177,7 @@ void iterate_all_puttable_pos(Oven const & oven, Piece const & piece, Func func)
         imos[ry][rx] += 1;
     }
     REP (y, H - piece.height() + 1) {
-        REP (x, H - piece.width() + 1) {
+        REP (x, W - piece.width() + 1) {
             imos[y    ][x + 1] += imos[y][x];
             imos[y + 1][x    ] += imos[y][x];
             imos[y + 1][x + 1] -= imos[y][x];
