@@ -195,12 +195,12 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
         return vector<pair<int, Action> >();
     }
 
-    auto get_score_delta_one = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, array<bool, K> const & removed, int i, int ly, int lx) {
+    auto get_score_delta_one = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, array<int, K> const & updated, int i, int t0, int ly, int lx) {
         auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
         int ry = ly + piece.height();
         int rx = lx + piece.width();
-        int t0 = puttable_t[i][ly][lx];
         int t = piece.requiredHeatTurnCount();
+        double k = 1 + 10 * piece.height() * piece.width() / (double)(H * W);
         auto touch = [&](int y, int x) -> double {
             if (not is_on_oven(y, x)) return t;
             double acc = 0;
@@ -208,18 +208,18 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
                 acc += max(0, min<int>(rest_heat_turn[y][x], t + t0) - t0);
             }
             int j = used[y][x];
-            if (j != -1 and not removed[j]) {
+            if (j != -1 and updated[j] != -1) {
                 auto const & piece_ = stage.candidateLane(CandidateLaneType_Large).pieces()[j];
-                int t0_ = cur[j].first;
+                int t0_ = updated[j];
                 int t_ = piece_.requiredHeatTurnCount();
                 int a = max(0, min(t0 + t, t0_ + t_) - max(t0, t0_));
                 int b = abs((t0 + t) - (t0_ + t_)) + abs(t0 - t0_);
-                acc += exp(- t0_ / 2.0) * max(1.0, a - 0.5 * b);
+                acc += 10 / k * exp(- t0_ / 10.0) * max(1.0, a - 0.5 * b);
             }
             return acc;
         };
         double score = 0;
-        score += pow(piece.height() * piece.width(), 1.5);
+        score += 10 * pow(piece.height() * piece.width(), 1.3);
         if (lx == 0) score += t * (ry - ly);
         if (lx != 0) REP3 (y, ly, ry) touch(y, lx - 1);
         if (ly == 0) score += t * (rx - lx);
@@ -228,28 +228,45 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
         if (rx != W) REP3 (y, ly, ry) touch(y, rx);
         if (ry == H) score += t * (rx - lx);
         if (ry != H) REP3 (x, lx, rx) touch(ry, x);
-        return exp(- t0 / 2.0) * score;
+        return k * exp(- t0 / 10.0) * score;
     };
 
     auto get_score_delta_unput = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i) {
         assert (cur[i].first != -1);
-        array<bool, K> removed = {};
+        array<int, K> updated;
+        REP (j, K) updated[j] = cur[j].first;
         auto const & pos = cur[i].second.putPos();
-        return - get_score_delta_one(cur, used, removed, i, pos.y, pos.x);
+        return - get_score_delta_one(cur, used, updated, i, updated[i], pos.y, pos.x);
     };
 
-    auto get_score_delta_put = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i, int y, int x) {
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+    auto get_score_delta_put = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i, int t0, int y, int x) {
+        assert (puttable_t[i][y][x] <= t0);
+        array<int, K> updated;
+        REP (j, K) updated[j] = cur[j].first;
+        array<int, K> order;
+        iota(ALL(order), 0);
+        sort(ALL(order), [&](int j1, int j2) { return updated[j1] < updated[j2]; });
+
         double score = 0;
-        array<bool, K> removed = {};
-        REP (j, K) if (cur[j].first != -1) {
+        set<int> used_t0;
+        used_t0.insert(t0);
+        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        for (int j : order) {
+            if (updated[j] == -1) continue;
             auto const & action = cur[j].second;
             if (j == i or is_intersect(Vector2i(x, y), piece, action.putPos(), get_piece_from_action(stage, action))) {
-                removed[j] = true;
-                score -= get_score_delta_one(cur, used, removed, j, action.putPos().y, action.putPos().x);
+                score -= get_score_delta_one(cur, used, updated, j, updated[j], action.putPos().y, action.putPos().x);
+                updated[j] = -1;
+                continue;
             }
+            if (used_t0.count(updated[j])) {
+                score -= get_score_delta_one(cur, used, updated, j, updated[j], action.putPos().y, action.putPos().x);
+                while (used_t0.count(updated[j])) ++ updated[j];
+                score += get_score_delta_one(cur, used, updated, j, updated[j], action.putPos().y, action.putPos().x);
+            }
+            used_t0.insert(updated[j]);
         }
-        score += get_score_delta_one(cur, used, removed, i, y, x);
+        score += get_score_delta_one(cur, used, updated, i, t0, y, x);
         return score;
     };
 
@@ -265,20 +282,33 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
         cur[i].first = -1;
     };
 
-    auto put = [&](array<pair<int, Action>, K> & cur, array<array<int8_t, H>, W> & used, int i, int ly, int lx) {
+    auto put = [&](array<pair<int, Action>, K> & cur, array<array<int8_t, H>, W> & used, int i, int t0, int ly, int lx) {
+        assert (puttable_t[i][ly][lx] <= t0);
+        array<int, K> order;
+        iota(ALL(order), 0);
+        sort(ALL(order), [&](int j1, int j2) { return cur[j1].first < cur[j2].first; });
+
+        set<int> used_t0;
+        used_t0.insert(t0);
         auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-        if (cur[i].first != -1) {
-            unput(cur, used, i);
+        for (int j : order) {
+            int & t0_ = cur[j].first;
+            if (t0_ == -1) continue;
+            auto const & action = cur[j].second;
+            if (j == i or is_intersect(Vector2i(lx, ly), piece, action.putPos(), get_piece_from_action(stage, action))) {
+                unput(cur, used, j);
+                t0_ = -1;
+                continue;
+            }
+            while (used_t0.count(t0_)) ++ t0_;
+            used_t0.insert(t0_);
         }
         int ry = ly + piece.height();
         int rx = lx + piece.width();
         REP3 (y, ly, ry) REP3 (x, lx, rx) {
-            if (used[y][x] != -1) {
-                unput(cur, used, used[y][x]);
-            }
             used[y][x] = i;
         }
-        cur[i].first = puttable_t[i][ly][lx];
+        cur[i].first = t0;
         cur[i].second = Action::Put(CandidateLaneType_Large, i, Vector2i(lx, ly));
     };
 
@@ -290,52 +320,68 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
 
     auto result = cur;
     auto highscore = score;
-    constexpr int ITERATION = 2048;
+    constexpr int ITERATION = 1024;
     REP (iteration, ITERATION) {
+        auto use = [&](int i, int t0, int y, int x) {
+            assert (puttable_t[i][y][x] <= t0);
+            auto delta = get_score_delta_put(cur, used, i, t0, y, x);
+            double temperature = (double)(ITERATION - iteration) / ITERATION;
+            constexpr double BOLTZMANN = 0.01;
+            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta / temperature))(gen)) {
+                score += delta;
+                put(cur, used, i, t0, y, x);
+                if (highscore < score) {
+if (stage.turn() == 0) cerr << iteration << " : highscore = " << score << endl;
+                    highscore = score;
+                    result = cur;
+                }
+                return true;
+            }
+            return false;
+        };
 
         int i = sample1(ALL(puttable_i), gen);
         shuffle(ALL(puttable_pos[i]), gen);
         for (auto const & pos : puttable_pos[i]) {
             int y, x; tie(y, x) = pos;
-
-            auto delta = get_score_delta_put(cur, used, i, y, x);
-            double temperature = (double)(ITERATION - iteration) / ITERATION;
-            constexpr double BOLTZMANN = 0.01;
-            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta / temperature))(gen)) {
-                score += delta;
-                put(cur, used, i, y, x);
-                if (highscore < score) {
-                    highscore = score;
-                    result = cur;
-                }
+            int t0 = 0;
+            if (cur[i].first != -1 and bernoulli_distribution(0.5)(gen)) {
+                t0 = cur[i].first;
+            }
+            t0 = max<int>(puttable_t[i][y][x], t0);
+            if (use(i, t0, y, x)) {
                 break;
             }
         }
     }
+if (stage.turn() == 0) {
+    REP (y, H) {
+        REP (x, W) {
+            if (used[y][x] != -1) {
+                fprintf(stderr, "%d", cur[used[y][x]].first);
+            } else {
+                fprintf(stderr, ".");
+            }
+        }
+        cerr << endl;
+    }
+}
 
+#ifdef LOCAL
     REP (i, K) if (cur[i].first != -1) {
         score += get_score_delta_unput(cur, used, i);
         unput(cur, used, i);
     }
-#ifdef LOCAL
     assert (abs(score) < 1e-8);
 #endif
-    vector<pair<double, int> > order;
-    REP (i, K) if (result[i].first != -1) {
-        auto const & pos = result[i].second.putPos();
-        double score_i = get_score_delta_put(cur, used, i, pos.y, pos.x);
-        order.emplace_back(score_i, i);
-    }
     vector<pair<int, Action> > actions;
-    set<int> fixed_turn;
-    sort(order.rbegin(), order.rend());
-    for (auto it : order) {
-        int i = it.second;
-        int turn = stage.turn() + result[i].first;
-        while (fixed_turn.count(turn)) ++ turn;
-        fixed_turn.insert(turn);
-        actions.emplace_back(turn, result[i].second);
+    REP (i, K) if (result[i].first != -1) {
+        int t = result[i].first + stage.turn();
+        actions.emplace_back(t, result[i].second);
     }
+    sort(ALL(actions), [&](pair<int, Action> const & a, pair<int, Action> const & b) {
+        return a.first < b.first;
+    });
     return actions;
 }
 
