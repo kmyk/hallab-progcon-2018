@@ -1,11 +1,14 @@
 ﻿#include <algorithm>
+#include <array>
 #include <bitset>
 #include <cassert>
 #include <climits>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <numeric>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -201,69 +204,43 @@ bool operator != (Action const & a, Action const & b) {
 }
 
 vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
-    constexpr int BEAM_DEPTH = 13;
-    constexpr int BEAM_WIDTH = 5;
-    static vector<shared_ptr<state_t> > cur, prv;
-    static array<int, (1 << Parameter::CandidatePieceCount)> used_pieces = {};
-    static unordered_set<uint64_t> used_oven;
+    constexpr int BEAM_DEPTH = 8;
+    constexpr int BEAM_WIDTH = 3;
+    array<map<uint8_t, int>, BEAM_DEPTH> used_pieces;
+    array<set<uint64_t>, BEAM_DEPTH> used_oven;
 
-    cur.push_back(new_initial_state(stage));
-    shared_ptr<state_t> best = cur.front();
-    for (int iteration = 0; iteration < BEAM_DEPTH; ++ iteration) {
-        // 置いてみる
-        cur.swap(prv);
-        cur.clear();
-        for (auto const & a : prv) {
-            cur.push_back(new_next_state(a, stage, Action::Wait()));
-            REP (i, Parameter::CandidatePieceCount) if (not (a->used & (1u << i))) {
+    shared_ptr<state_t> best = new_initial_state(stage);
+    REP (chokudai, BEAM_WIDTH) {
+        auto cur = new_initial_state(stage);
+        REP (iteration, BEAM_DEPTH) {
+            // 待つ
+            auto prv = cur;
+            cur = new_next_state(prv, stage, Action::Wait());
+
+            // 置いてみる
+            REP (i, Parameter::CandidatePieceCount) if (not (prv->used & (1u << i))) {
+                if (used_pieces[iteration][i]) continue;
                 auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
-                iterate_all_puttable_pos(a->oven, piece, [&](Vector2i const & pos) {
+                iterate_all_puttable_pos(prv->oven, piece, [&](Vector2i const & pos) {
                     auto action = Action::Put(CandidateLaneType_Large, i, pos);
-                    cur.push_back(new_next_state(a, stage, action));
+                    auto nxt = new_next_state(prv, stage, action);
+                    uint64_t hash = hash_oven(nxt->oven);
+                    if (used_oven[iteration].count(hash)) return;
+                    if (cur->score < nxt->score) cur = nxt;
                 });
             }
-        }
 
-        // 並べ替え
-        sort(ALL(cur), [&](shared_ptr<state_t> const & a, shared_ptr<state_t> const & b) {
-            return a->score > b->score;
-        });
-        if (best->score < cur.front()->score) {
-            best = cur.front();
-        }
-
-        // 重複排除
-        cur.swap(prv);
-        cur.clear();
-        for (auto const & a : prv) {
-            if (used_pieces[a->used] >= 2) continue;
-            uint64_t hash = hash_oven(a->oven);
-            if (used_oven.count(hash)) continue;
-            cur.push_back(a);
-            used_pieces[a->used] += 1;
-            used_oven.insert(hash);
-            if ((int)cur.size() >= BEAM_WIDTH) break;
-        }
-        fill(ALL(used_pieces), 0);
-        used_oven.clear();
-
-        // 結果が確定してたら打ち切り
-        if (not best->actions.empty() and best->actions.front().first == stage.turn()) {
-            auto action = best->actions.front().second;
-            bool all_same = true;
-            for (auto const & a : cur) {
-                if (a->actions.empty() or a->actions.front().second != action) {
-                    all_same = false;
-                    break;
-                }
+            // 更新
+            if (best->score < cur->score) {
+                best = cur;
             }
-            if (all_same) {
-                break;
-            }
+
+            // 重複排除
+            uint64_t hash = hash_oven(cur->oven);
+            used_pieces[iteration][cur->used] += 1;
+            used_oven[iteration].insert(hash);
         }
     }
-    cur.clear();
-    prv.clear();
 
     // 結果の取り出し
     return best->actions;
