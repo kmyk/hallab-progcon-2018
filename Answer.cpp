@@ -269,7 +269,21 @@ vector<pair<int, Action> > do_large_beam_search(Stage const & stage) {
     return best->actions;
 }
 
-Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & actions) {
+bool check_shape_portrait(CandidateLane const & lane) {
+    int portrait = 0, landscape = 0;
+    for (auto const & piece : lane.pieces()) {
+        if (piece.height() > piece.width()) {
+            ++ portrait;
+        } else if (piece.height() < piece.width()) {
+            ++ landscape;
+        }
+    }
+    return (portrait >= landscape);
+}
+
+Action do_small_greedy(Stage const & stage, bool is_portrait, vector<pair<int, Action> > const & actions) {
+    constexpr int H = Parameter::OvenHeight;
+    constexpr int W = Parameter::OvenWidth;
     array<int, Parameter::CandidatePieceCount> order;
     iota(ALL(order), 0);
     sort(ALL(order), [&](int i, int j) {
@@ -281,8 +295,12 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
         auto const & piece = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
         bool found = false;
         Vector2i found_pos;
+        int found_z;
         iterate_all_puttable_pos(stage.oven(), piece, [&](Vector2i const & pos) {
-            if (found) return;
+            int zy = min(pos.y, H - (pos.y + piece.height()));
+            int zx = min(pos.x, W - (pos.x + piece.width()));
+            int z = (is_portrait ? zy : zx);
+            if (found and found_z <= z) return;
 
             // 大型クッキーの予定と整合するか確認
             for (auto const & it : actions) {
@@ -295,6 +313,7 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
 
             found = true;
             found_pos = pos;
+            found_z = z;
         });
 
         if (found) {
@@ -307,12 +326,14 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
 
 class solver {
     packed_oven_t last_oven;
+    bool is_small_portrait;
 
 public:
     Stage const & stage;
     solver(Stage const & stage_)
             : stage(stage_) {
         last_oven = pack_oven(stage_.oven());
+        is_small_portrait = check_shape_portrait(stage.candidateLane(CandidateLaneType_Large));
     }
 
     Action decide_next_action(Stage const & stage_) {
@@ -349,7 +370,7 @@ public:
         }
 
         // 小型クッキーは貪欲
-        auto action = do_small_greedy(stage, actions);
+        auto action = do_small_greedy(stage, is_small_portrait, actions);
         if (not action.isWaiting()) return action;
 
         return Action::Wait();
