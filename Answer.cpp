@@ -231,6 +231,8 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
         return k * exp(- t0 / 10.0) * score;
     };
 
+// -Werror 付けるのやめてほしい
+#ifdef LOCAL
     auto get_score_delta_unput = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i) {
         assert (cur[i].first != -1);
         array<int, K> updated;
@@ -238,6 +240,7 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
         auto const & pos = cur[i].second.putPos();
         return - get_score_delta_one(cur, used, updated, i, updated[i], pos.y, pos.x);
     };
+#endif
 
     auto get_score_delta_put = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i, int t0, int y, int x) {
         assert (puttable_t[i][y][x] <= t0);
@@ -318,20 +321,28 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
     array<array<int8_t, H>, W> used = {};
     REP (y, H) REP (x, W) used[y][x] = -1;
 
+    vector<int> placed;
+    set<int> used_t0;
+
     auto result = cur;
     auto highscore = score;
-    constexpr int ITERATION = 1024;
+    constexpr int ITERATION = 5000;
     REP (iteration, ITERATION) {
         auto use = [&](int i, int t0, int y, int x) {
             assert (puttable_t[i][y][x] <= t0);
             auto delta = get_score_delta_put(cur, used, i, t0, y, x);
             double temperature = (double)(ITERATION - iteration) / ITERATION;
-            constexpr double BOLTZMANN = 0.01;
+            double BOLTZMANN = iteration % 10 == 0 ? 0.0001 : 0.01;
             if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta / temperature))(gen)) {
                 score += delta;
                 put(cur, used, i, t0, y, x);
+                placed.clear();
+                used_t0 = set<int>();
+                REP (j, K) if (cur[j].first != -1) {
+                    placed.push_back(j);
+                    used_t0.insert(cur[j].first);
+                }
                 if (highscore < score) {
-if (stage.turn() == 0) cerr << iteration << " : highscore = " << score << endl;
                     highscore = score;
                     result = cur;
                 }
@@ -340,20 +351,48 @@ if (stage.turn() == 0) cerr << iteration << " : highscore = " << score << endl;
             return false;
         };
 
-        int i = sample1(ALL(puttable_i), gen);
-        shuffle(ALL(puttable_pos[i]), gen);
-        for (auto const & pos : puttable_pos[i]) {
-            int y, x; tie(y, x) = pos;
-            int t0 = 0;
-            if (cur[i].first != -1 and bernoulli_distribution(0.5)(gen)) {
-                t0 = cur[i].first;
+
+        double prob = uniform_real_distribution<double>()(gen);
+        if (prob < 0.2 and not placed.empty()) {
+            int i = sample1(ALL(placed), gen);
+            int y = cur[i].second.putPos().y;
+            int x = cur[i].second.putPos().x;
+            int t0 = cur[i].first;
+            if (t0 == puttable_t[i][y][x]) continue;
+            int k = uniform_int_distribution<int>(1, 3)(gen);
+            t0 = max(0, t0 - k);
+            if (t0 < puttable_t[i][y][x]) continue;
+            use(i, t0, y, x);
+
+        } else if (prob < 0.4 and not placed.empty()) {
+            int i = sample1(ALL(placed), gen);
+            int y = cur[i].second.putPos().y;
+            int x = cur[i].second.putPos().x;
+            int dir = uniform_int_distribution<int>(0, 3)(gen);
+            while (true) {
+                switch (dir) {
+                    case 0: -- y; break;
+                    case 1: ++ y; break;
+                    case 2: ++ x; break;
+                    case 3: -- x; break;
+                }
+                if (not is_on_oven(y, x)) break;
+                if (puttable_t[i][y][x] == INT16_MAX) break;
+                int t0 = max<int>(puttable_t[i][y][x], cur[i].first);
+                use(i, t0, y, x);
             }
-            t0 = max<int>(puttable_t[i][y][x], t0);
-            if (use(i, t0, y, x)) {
-                break;
-            }
+
+        } else {
+            int i = sample1(ALL(puttable_i), gen);
+            int y, x; tie(y, x) = sample1(ALL(puttable_pos[i]), gen);
+            int t0 = puttable_t[i][y][x];
+            if (used_t0.count(t0)) ++ t0;
+            use(i, t0, y, x);
         }
     }
+
+#ifdef LOCAL
+if (stage.turn() == 0) cerr << "highscore = " << score << endl;
 if (stage.turn() == 0) {
     REP (y, H) {
         REP (x, W) {
@@ -366,6 +405,7 @@ if (stage.turn() == 0) {
         cerr << endl;
     }
 }
+#endif
 
 #ifdef LOCAL
     REP (i, K) if (cur[i].first != -1) {
