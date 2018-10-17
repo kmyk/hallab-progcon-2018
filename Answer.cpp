@@ -169,7 +169,7 @@ void list_puttable_pos(Stage const & stage, array<array<array<int16_t, W>, H>, K
     }
 }
 
-vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
+vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vector<pair<int, Action> > const & hint) {
     constexpr int DEPTH = 20;
 #ifdef LOCAL
     random_device device;
@@ -318,21 +318,38 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
     array<pair<int, Action>, K> cur;
     fill(ALL(cur), make_pair(-1, Action::Wait()));
     double score = 0;
-    array<array<int8_t, H>, W> used = {};
+    array<array<int8_t, H>, W> used;
     REP (y, H) REP (x, W) used[y][x] = -1;
 
     vector<int> placed;
     set<int> used_t0;
 
+    for (auto const & it : hint) {
+        int t0 = it.first - stage.turn();
+        assert (t0 >= 0);
+        auto const & action = it.second;
+        assert (action.candidateLaneType() == CandidateLaneType_Large);
+        int i = action.pieceIndex();
+        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) continue;
+        int y = action.putPos().y;
+        int x = action.putPos().x;
+        assert (puttable_t[i][y][x] <= t0);
+        score += get_score_delta_put(cur, used, i, t0, y, x);
+        put(cur, used, i, t0, y, x);
+        placed.push_back(i);
+        used_t0.insert(t0);
+    }
+
     auto result = cur;
     auto highscore = score;
-    constexpr int ITERATION = 5000;
+    constexpr int ITERATION = 1500;
     REP (iteration, ITERATION) {
         auto use = [&](int i, int t0, int y, int x) {
             assert (puttable_t[i][y][x] <= t0);
             auto delta = get_score_delta_put(cur, used, i, t0, y, x);
             double temperature = (double)(ITERATION - iteration) / ITERATION;
-            double BOLTZMANN = iteration % 10 == 0 ? 0.0001 : 0.01;
+            double BOLTZMANN = 0.01;
             if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta / temperature))(gen)) {
                 score += delta;
                 put(cur, used, i, t0, y, x);
@@ -392,12 +409,18 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage) {
     }
 
 #ifdef LOCAL
-if (stage.turn() == 0) cerr << "highscore = " << score << endl;
-if (stage.turn() == 0) {
+if (stage.turn() == 3) cerr << "highscore = " << score << endl;
+if (stage.turn() == 3) {
     REP (y, H) {
         REP (x, W) {
             if (used[y][x] != -1) {
-                fprintf(stderr, "%d", cur[used[y][x]].first);
+                if (cur[used[y][x]].first >= 0x10) {
+                    fprintf(stderr, "z");
+                } else {
+                    fprintf(stderr, "%x", cur[used[y][x]].first);
+                }
+            } else if (rest_heat_turn[y][x]) {
+                fprintf(stderr, "#");
             } else {
                 fprintf(stderr, ".");
             }
@@ -461,9 +484,13 @@ Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & a
     return Action::Wait();
 }
 
+int get_next_index(int removed, int i) {
+    assert (i != removed);
+    return i < removed ? i : i - 1;
+}
+
 class solver {
     packed_oven_t last_oven;
-    int actions_turn;
     vector<pair<int, Action> > actions;
 
 public:
@@ -471,7 +498,6 @@ public:
     solver(Stage const & stage_)
             : stage(stage_) {
         last_oven = pack_oven(stage_.oven());
-        actions_turn = -1;
     }
 
     Action decide_next_action(Stage const & stage_) {
@@ -502,15 +528,18 @@ public:
         // }
 
         // 大型クッキーについて焼き鈍し
-        if (actions_turn == -1 or stage.turn() > actions_turn + 8) {
-            actions_turn = stage.turn();
-            actions = do_large_simulated_annealing(stage);
-        }
+        actions = do_large_simulated_annealing(stage, actions);
         assert (actions.empty() or actions.front().first >= stage.turn());
         if (not actions.empty() and actions.front().first == stage.turn()) {
             auto action = actions.front().second;
-            actions_turn = -1;
-            actions.clear();
+            int removed = action.pieceIndex();
+            actions.erase(actions.begin());
+            for (auto & it : actions) {
+                it.second = Action::Put(
+                    it.second.candidateLaneType(),
+                    get_next_index(removed, it.second.pieceIndex()),
+                    it.second.putPos());
+            }
             return action;
         }
 
