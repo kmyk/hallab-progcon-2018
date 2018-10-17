@@ -280,6 +280,20 @@ vector<pair<int, Action> > do_simulated_annealing(Stage const & stage, vector<pa
         return score;
     };
 
+    auto does_conflict = [&](array<pair<int, Action>, 2 * K> & cur, array<array<int8_t, H>, W> & used, int i, int t0, int ly, int lx) {
+        auto const & piece = get_piece(stage, i);
+        REP (j, 2 * K) {
+            int & t0_ = cur[j].first;
+            if (t0_ == -1) continue;
+            auto const & action = cur[j].second;
+            if (j == i or is_intersect(Vector2i(lx, ly), piece, action.putPos(), get_piece_from_action(stage, action))) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+
     auto unput = [&](array<pair<int, Action>, 2 * K> & cur, array<array<int8_t, H>, W> & used, int i) {
         auto const & piece = get_piece(stage, i);
         int ly = cur[i].second.putPos().y;
@@ -407,6 +421,72 @@ vector<pair<int, Action> > do_simulated_annealing(Stage const & stage, vector<pa
                 use(i, t0, y, x);
                 ++ iteration;
             }
+
+
+        } else if (prob < 0.6 and not placed.empty()) {
+            int dir = uniform_int_distribution<int>(0, 3)(gen);
+            vector<pair<int, int> > order;
+            for (int i : placed) {
+                int y = cur[i].second.putPos().y;
+                int x = cur[i].second.putPos().x;
+                switch (dir) {
+                    case 0: order.emplace_back(- y, i); break;
+                    case 1: order.emplace_back(+ y, i); break;
+                    case 2: order.emplace_back(+ x, i); break;
+                    case 3: order.emplace_back(- x, i); break;
+                }
+            }
+            sort(ALL(order));
+
+            array<pair<int, Action>, 2 * K> nxt;
+            fill(ALL(nxt), make_pair(-1, Action::Wait()));
+            double next_score = 0;
+            array<array<int8_t, H>, W> next_used;
+            REP (y, H) REP (x, W) next_used[y][x] = -1;
+
+            for (auto it : order) {
+                int i = it.second;
+                int t0 = cur[i].first;
+                int y = cur[i].second.putPos().y;
+                int x = cur[i].second.putPos().x;
+                while (true) {
+                    int ny = y;
+                    int nx = x;
+                    switch (dir) {
+                        case 0: -- ny; break;
+                        case 1: ++ ny; break;
+                        case 2: ++ nx; break;
+                        case 3: -- nx; break;
+                    }
+                    if (not is_on_oven(ny, nx)) break;
+                    if (t0 < puttable_t[i][ny][nx]) break;
+                    if (does_conflict(nxt, next_used, i, t0, ny, nx)) break;
+                    y = ny;
+                    x = nx;
+                }
+                next_score += get_score_delta_put(nxt, next_used, i, t0, y, x);
+                put(nxt, next_used, i, t0, y, x);
+            }
+            auto delta = next_score - score;
+            double temperature = (double)(ITERATION - iteration) / ITERATION;
+            double BOLTZMANN = 0.001;
+            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta) * temperature)(gen)) {
+                score = next_score;
+                cur = nxt;
+                used = next_used;
+                placed_small.clear();
+                placed_large.clear();
+                used_t0 = set<int>();
+                REP (j, 2 * K) if (cur[j].first != -1) {
+                    (j < K ? placed_small : placed_large).push_back(j);
+                    used_t0.insert(cur[j].first);
+                }
+                if (highscore < score) {
+                    highscore = score;
+                    result = cur;
+                }
+            }
+
 
         } else {
             int i = sample1(ALL(puttable_i), gen);
