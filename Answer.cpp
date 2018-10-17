@@ -200,7 +200,6 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
         int ry = ly + piece.height();
         int rx = lx + piece.width();
         int t = piece.requiredHeatTurnCount();
-        double k = 1 + 10 * piece.height() * piece.width() / (double)(H * W);
         auto touch = [&](int y, int x) -> double {
             if (not is_on_oven(y, x)) return t;
             double acc = 0;
@@ -213,13 +212,11 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
                 int t0_ = updated[j];
                 int t_ = piece_.requiredHeatTurnCount();
                 int a = max(0, min(t0 + t, t0_ + t_) - max(t0, t0_));
-                int b = abs((t0 + t) - (t0_ + t_)) + abs(t0 - t0_);
-                acc += 10 / k * exp(- t0_ / 10.0) * max(1.0, a - 0.5 * b);
+                acc += pow(0.9, max(t0, t0_) - t0) * a;
             }
             return acc;
         };
         double score = 0;
-        score += 10 * pow(piece.height() * piece.width(), 1.3);
         if (lx == 0) score += t * (ry - ly);
         if (lx != 0) REP3 (y, ly, ry) touch(y, lx - 1);
         if (ly == 0) score += t * (rx - lx);
@@ -228,7 +225,7 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
         if (rx != W) REP3 (y, ly, ry) touch(y, rx);
         if (ry == H) score += t * (rx - lx);
         if (ry != H) REP3 (x, lx, rx) touch(ry, x);
-        return k * exp(- t0 / 10.0) * score;
+        return pow(0.9, t0) * pow(piece.height() * piece.width(), 1.1) * 100 + pow(0.9, t0) * score;
     };
 
 // -Werror 付けるのやめてほしい
@@ -349,8 +346,8 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
             assert (puttable_t[i][y][x] <= t0);
             auto delta = get_score_delta_put(cur, used, i, t0, y, x);
             double temperature = (double)(ITERATION - iteration) / ITERATION;
-            double BOLTZMANN = 0.01;
-            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta / temperature))(gen)) {
+            double BOLTZMANN = 0.001;
+            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta) * temperature)(gen)) {
                 score += delta;
                 put(cur, used, i, t0, y, x);
                 placed.clear();
@@ -381,7 +378,7 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
             if (t0 < puttable_t[i][y][x]) continue;
             use(i, t0, y, x);
 
-        } else if (prob < 0.4 and not placed.empty()) {
+        } else if (prob < 0.3 and not placed.empty()) {
             int i = sample1(ALL(placed), gen);
             int y = cur[i].second.putPos().y;
             int x = cur[i].second.putPos().x;
@@ -395,8 +392,9 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
                 }
                 if (not is_on_oven(y, x)) break;
                 if (puttable_t[i][y][x] == INT16_MAX) break;
-                int t0 = max<int>(puttable_t[i][y][x], cur[i].first);
+                int t0 = max<int>(puttable_t[i][y][x], cur[i].first - 1);
                 use(i, t0, y, x);
+                ++ iteration;
             }
 
         } else {
