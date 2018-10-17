@@ -141,10 +141,20 @@ void fill_rest_hest_turn(Oven const & oven, array<array<int16_t, W>, H> & rest_h
     }
 }
 
-void fill_puttable_t(Stage const & stage, array<array<array<int16_t, W>, H>, K> & puttable_t) {
+CandidateLaneType get_candidate_lane_type(int i) {
+    assert (0 <= i and i < 2 * K);
+    return i < K ? CandidateLaneType_Small : CandidateLaneType_Large;
+}
+Piece const & get_piece(Stage const & stage, int i) {
+    assert (0 <= i and i < 2 * K);
+    return stage.candidateLane(get_candidate_lane_type(i)).pieces()[i % K];
+}
+
+void fill_puttable_t(Stage const & stage, array<array<array<int16_t, W>, H>, 2 * K> & puttable_t) {
     // TODO: O(KHWb) から O(Kb + KHW) にできる
-    REP (i, K) {
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+    // TODO: uint8_t でよくないか
+    REP (i, 2 * K) {
+        auto const & piece = get_piece(stage, i);
         REP (y, H) REP (x, W) puttable_t[i][y][x] = INT16_MAX;
         if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) continue;
         REP (y, H - piece.height() + 1) REP (x, W - piece.width() + 1) {
@@ -158,8 +168,8 @@ void fill_puttable_t(Stage const & stage, array<array<array<int16_t, W>, H>, K> 
     }
 }
 
-void list_puttable_pos(Stage const & stage, array<array<array<int16_t, W>, H>, K> const & puttable_t, int DEPTH, array<vector<pair<int8_t, int8_t> >, K> & puttable_pos) {
-    REP (i, K) {
+void list_puttable_pos(Stage const & stage, array<array<array<int16_t, W>, H>, 2 * K> const & puttable_t, int DEPTH, array<vector<pair<int8_t, int8_t> >, 2 * K> & puttable_pos) {
+    REP (i, 2 * K) {
         puttable_pos[i].clear();
         REP (y, H) REP (x, W) {
             if (puttable_t[i][y][x] < DEPTH) {
@@ -169,7 +179,7 @@ void list_puttable_pos(Stage const & stage, array<array<array<int16_t, W>, H>, K
     }
 }
 
-vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vector<pair<int, Action> > const & hint) {
+vector<pair<int, Action> > do_simulated_annealing(Stage const & stage, vector<pair<int, Action> > const & hint) {
     constexpr int DEPTH = 20;
 #ifdef LOCAL
     random_device device;
@@ -181,22 +191,22 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
     static array<array<int16_t, W>, H> rest_heat_turn;
     fill_rest_hest_turn(stage.oven(), rest_heat_turn);
 
-    static array<array<array<int16_t, W>, H>, K> puttable_t;
+    static array<array<array<int16_t, W>, H>, 2 * K> puttable_t;
     fill_puttable_t(stage, puttable_t);
 
-    static array<vector<pair<int8_t, int8_t> >, K> puttable_pos;
+    static array<vector<pair<int8_t, int8_t> >, 2 * K> puttable_pos;
     list_puttable_pos(stage, puttable_t, DEPTH, puttable_pos);
 
     vector<int> puttable_i;
-    REP (i, K) if (not puttable_pos[i].empty()) {
+    REP (i, 2 * K) if (not puttable_pos[i].empty()) {
         puttable_i.push_back(i);
     }
     if (puttable_i.empty()) {
         return vector<pair<int, Action> >();
     }
 
-    auto get_score_delta_one = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, array<int, K> const & updated, int i, int t0, int ly, int lx) {
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+    auto get_score_delta_one = [&](array<pair<int, Action>, 2 * K> const & cur, array<array<int8_t, H>, W> const & used, array<int, 2 * K> const & updated, int i, int t0, int ly, int lx) {
+        auto const & piece = get_piece(stage, i);
         int ry = ly + piece.height();
         int rx = lx + piece.width();
         int t = piece.requiredHeatTurnCount();
@@ -208,7 +218,7 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
             }
             int j = used[y][x];
             if (j != -1 and updated[j] != -1) {
-                auto const & piece_ = stage.candidateLane(CandidateLaneType_Large).pieces()[j];
+                auto const & piece_ = get_piece(stage, j);
                 int t0_ = updated[j];
                 int t_ = piece_.requiredHeatTurnCount();
                 int a = max(0, min(t0 + t, t0_ + t_) - max(t0, t0_));
@@ -230,27 +240,27 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
 
 // -Werror 付けるのやめてほしい
 #ifdef LOCAL
-    auto get_score_delta_unput = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i) {
+    auto get_score_delta_unput = [&](array<pair<int, Action>, 2 * K> const & cur, array<array<int8_t, H>, W> const & used, int i) {
         assert (cur[i].first != -1);
-        array<int, K> updated;
-        REP (j, K) updated[j] = cur[j].first;
+        array<int, 2 * K> updated;
+        REP (j, 2 * K) updated[j] = cur[j].first;
         auto const & pos = cur[i].second.putPos();
         return - get_score_delta_one(cur, used, updated, i, updated[i], pos.y, pos.x);
     };
 #endif
 
-    auto get_score_delta_put = [&](array<pair<int, Action>, K> const & cur, array<array<int8_t, H>, W> const & used, int i, int t0, int y, int x) {
+    auto get_score_delta_put = [&](array<pair<int, Action>, 2 * K> const & cur, array<array<int8_t, H>, W> const & used, int i, int t0, int y, int x) {
         assert (puttable_t[i][y][x] <= t0);
-        array<int, K> updated;
-        REP (j, K) updated[j] = cur[j].first;
-        array<int, K> order;
+        array<int, 2 * K> updated;
+        REP (j, 2 * K) updated[j] = cur[j].first;
+        array<int, 2 * K> order;
         iota(ALL(order), 0);
         sort(ALL(order), [&](int j1, int j2) { return updated[j1] < updated[j2]; });
 
         double score = 0;
         set<int> used_t0;
         used_t0.insert(t0);
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        auto const & piece = get_piece(stage, i);
         for (int j : order) {
             if (updated[j] == -1) continue;
             auto const & action = cur[j].second;
@@ -270,8 +280,8 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
         return score;
     };
 
-    auto unput = [&](array<pair<int, Action>, K> & cur, array<array<int8_t, H>, W> & used, int i) {
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+    auto unput = [&](array<pair<int, Action>, 2 * K> & cur, array<array<int8_t, H>, W> & used, int i) {
+        auto const & piece = get_piece(stage, i);
         int ly = cur[i].second.putPos().y;
         int lx = cur[i].second.putPos().x;
         int ry = ly + piece.height();
@@ -282,15 +292,15 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
         cur[i].first = -1;
     };
 
-    auto put = [&](array<pair<int, Action>, K> & cur, array<array<int8_t, H>, W> & used, int i, int t0, int ly, int lx) {
+    auto put = [&](array<pair<int, Action>, 2 * K> & cur, array<array<int8_t, H>, W> & used, int i, int t0, int ly, int lx) {
         assert (puttable_t[i][ly][lx] <= t0);
-        array<int, K> order;
+        array<int, 2 * K> order;
         iota(ALL(order), 0);
         sort(ALL(order), [&](int j1, int j2) { return cur[j1].first < cur[j2].first; });
 
         set<int> used_t0;
         used_t0.insert(t0);
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        auto const & piece = get_piece(stage, i);
         for (int j : order) {
             int & t0_ = cur[j].first;
             if (t0_ == -1) continue;
@@ -309,38 +319,37 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
             used[y][x] = i;
         }
         cur[i].first = t0;
-        cur[i].second = Action::Put(CandidateLaneType_Large, i, Vector2i(lx, ly));
+        cur[i].second = Action::Put(get_candidate_lane_type(i), i % K, Vector2i(lx, ly));
     };
 
-    array<pair<int, Action>, K> cur;
+    array<pair<int, Action>, 2 * K> cur;
     fill(ALL(cur), make_pair(-1, Action::Wait()));
     double score = 0;
     array<array<int8_t, H>, W> used;
     REP (y, H) REP (x, W) used[y][x] = -1;
 
-    vector<int> placed;
+    vector<int> placed_small, placed_large;
     set<int> used_t0;
 
     for (auto const & it : hint) {
         int t0 = it.first - stage.turn();
         assert (t0 >= 0);
         auto const & action = it.second;
-        assert (action.candidateLaneType() == CandidateLaneType_Large);
-        int i = action.pieceIndex();
-        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        auto const & piece = stage.candidateLane(action.candidateLaneType()).pieces()[action.pieceIndex()];
         if (stage.turn() + piece.requiredHeatTurnCount() >= Parameter::GameTurnLimit) continue;
+        int i = (action.candidateLaneType() == CandidateLaneType_Small ? 0 : 8) + action.pieceIndex();
         int y = action.putPos().y;
         int x = action.putPos().x;
         assert (puttable_t[i][y][x] <= t0);
         score += get_score_delta_put(cur, used, i, t0, y, x);
         put(cur, used, i, t0, y, x);
-        placed.push_back(i);
+        (i < K ? placed_small : placed_large).push_back(i);
         used_t0.insert(t0);
     }
 
     auto result = cur;
     auto highscore = score;
-    constexpr int ITERATION = 1500;
+    constexpr int ITERATION = 1000;
     REP (iteration, ITERATION) {
         auto use = [&](int i, int t0, int y, int x) {
             assert (puttable_t[i][y][x] <= t0);
@@ -350,10 +359,11 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
             if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta) * temperature)(gen)) {
                 score += delta;
                 put(cur, used, i, t0, y, x);
-                placed.clear();
+                placed_small.clear();
+                placed_large.clear();
                 used_t0 = set<int>();
-                REP (j, K) if (cur[j].first != -1) {
-                    placed.push_back(j);
+                REP (j, 2 * K) if (cur[j].first != -1) {
+                    (j < K ? placed_small : placed_large).push_back(j);
                     used_t0.insert(cur[j].first);
                 }
                 if (highscore < score) {
@@ -367,7 +377,8 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
 
 
         double prob = uniform_real_distribution<double>()(gen);
-        if (prob < 0.2 and not placed.empty()) {
+        auto const & placed = (iteration % 5 == 0 ? placed_small : placed_large);
+        if (prob < 0.1 and not placed.empty()) {
             int i = sample1(ALL(placed), gen);
             int y = cur[i].second.putPos().y;
             int x = cur[i].second.putPos().x;
@@ -429,14 +440,14 @@ if (stage.turn() == 3) {
 #endif
 
 #ifdef LOCAL
-    REP (i, K) if (cur[i].first != -1) {
+    REP (i, 2 * K) if (cur[i].first != -1) {
         score += get_score_delta_unput(cur, used, i);
         unput(cur, used, i);
     }
     assert (abs(score) < 1e-8);
 #endif
     vector<pair<int, Action> > actions;
-    REP (i, K) if (result[i].first != -1) {
+    REP (i, 2 * K) if (result[i].first != -1) {
         int t = result[i].first + stage.turn();
         actions.emplace_back(t, result[i].second);
     }
@@ -446,104 +457,40 @@ if (stage.turn() == 3) {
     return actions;
 }
 
-Action do_small_greedy(Stage const & stage, vector<pair<int, Action> > const & actions) {
-    array<int, Parameter::CandidatePieceCount> order;
-    iota(ALL(order), 0);
-    sort(ALL(order), [&](int i, int j) {
-        auto const & p = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
-        auto const & q = stage.candidateLane(CandidateLaneType_Small).pieces()[j];
-        return p.height() * p.width() > q.height() * q.width();
-    });
-    for (int i : order) {
-        auto const & piece = stage.candidateLane(CandidateLaneType_Small).pieces()[i];
-        bool found = false;
-        Vector2i found_pos;
-        iterate_all_puttable_pos(stage.oven(), piece, [&](Vector2i const & pos) {
-            if (found) return;
-
-            // 大型クッキーの予定と整合するか確認
-            for (auto const & it : actions) {
-                if (stage.turn() + piece.requiredHeatTurnCount() < it.first) break;
-                auto const & action = it.second;
-                if (is_intersect(pos, piece, action.putPos(), get_piece_from_action(stage, action))) {
-                    return;
-                }
-            }
-
-            found = true;
-            found_pos = pos;
-        });
-
-        if (found) {
-            return Action::Put(CandidateLaneType_Small, i, found_pos);
-        }
-    }
-
-    return Action::Wait();
-}
-
 int get_next_index(int removed, int i) {
     assert (i != removed);
     return i < removed ? i : i - 1;
 }
+Action get_action_with_next_index(CandidateLaneType lane_type, int i, Action const & action) {
+    if (action.isWaiting() or action.candidateLaneType() != lane_type) return action;
+    return Action::Put(
+            action.candidateLaneType(),
+            get_next_index(i, action.pieceIndex()),
+            action.putPos());
+}
 
 class solver {
-    packed_oven_t last_oven;
     vector<pair<int, Action> > actions;
 
 public:
     Stage const & stage;
     solver(Stage const & stage_)
             : stage(stage_) {
-        last_oven = pack_oven(stage_.oven());
     }
 
     Action decide_next_action(Stage const & stage_) {
         assert (&stage == &stage_);
 
-        // // 状況が変わってないなら省略
-        // if (not stage_.oven().isEmpty()) {
-        //     auto packed_oven = pack_oven(stage_.oven());
-        //     if (packed_oven == last_oven) {
-        //         return Action::Wait();
-        //     }
-        //     last_oven = packed_oven;
-        // }
-
-        // // 置けるやつがひとつもないなら省略
-        // bool is_puttable = false;
-        // for (auto lane_type : { CandidateLaneType_Large, CandidateLaneType_Small }) {
-        //     REP (i, Parameter::CandidatePieceCount) {
-        //         if (is_puttable) break;
-        //         auto const & piece = stage.candidateLane(lane_type).pieces()[i];
-        //         iterate_all_puttable_pos(stage.oven(), piece, [&](Vector2i const & pos) {
-        //             is_puttable = true;
-        //         });
-        //     }
-        // }
-        // if (not is_puttable) {
-        //     return Action::Wait();
-        // }
-
-        // 大型クッキーについて焼き鈍し
-        actions = do_large_simulated_annealing(stage, actions);
+        actions = do_simulated_annealing(stage, actions);
         assert (actions.empty() or actions.front().first >= stage.turn());
         if (not actions.empty() and actions.front().first == stage.turn()) {
             auto action = actions.front().second;
-            int removed = action.pieceIndex();
             actions.erase(actions.begin());
             for (auto & it : actions) {
-                it.second = Action::Put(
-                    it.second.candidateLaneType(),
-                    get_next_index(removed, it.second.pieceIndex()),
-                    it.second.putPos());
+                it.second = get_action_with_next_index(action.candidateLaneType(), action.pieceIndex(), it.second);
             }
             return action;
         }
-
-        // 小型クッキーは貪欲
-        auto action = do_small_greedy(stage, actions);
-        if (not action.isWaiting()) return action;
 
         return Action::Wait();
     }
