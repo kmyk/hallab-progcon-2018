@@ -312,6 +312,19 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
         cur[i].second = Action::Put(CandidateLaneType_Large, i, Vector2i(lx, ly));
     };
 
+    auto does_conflict = [&](array<pair<int, Action>, K> & cur, array<array<int8_t, H>, W> & used, int i, int t0, int ly, int lx) {
+        auto const & piece = stage.candidateLane(CandidateLaneType_Large).pieces()[i];
+        REP (j, K) {
+            int & t0_ = cur[j].first;
+            if (t0_ == -1) continue;
+            auto const & action = cur[j].second;
+            if (j == i or is_intersect(Vector2i(lx, ly), piece, action.putPos(), get_piece_from_action(stage, action))) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     array<pair<int, Action>, K> cur;
     fill(ALL(cur), make_pair(-1, Action::Wait()));
     double score = 0;
@@ -367,7 +380,7 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
 
 
         double prob = uniform_real_distribution<double>()(gen);
-        if (prob < 0.2 and not placed.empty()) {
+        if (prob < 0.05 and not placed.empty()) {
             int i = sample1(ALL(placed), gen);
             int y = cur[i].second.putPos().y;
             int x = cur[i].second.putPos().x;
@@ -395,6 +408,69 @@ vector<pair<int, Action> > do_large_simulated_annealing(Stage const & stage, vec
                 int t0 = max<int>(puttable_t[i][y][x], cur[i].first - 1);
                 use(i, t0, y, x);
                 ++ iteration;
+            }
+
+        } else if (prob < 0.6 and not placed.empty()) {
+            int dir = uniform_int_distribution<int>(0, 3)(gen);
+            vector<pair<int, int> > order;
+            for (int i : placed) {
+                int y = cur[i].second.putPos().y;
+                int x = cur[i].second.putPos().x;
+                switch (dir) {
+                    case 0: order.emplace_back(- y, i); break;
+                    case 1: order.emplace_back(+ y, i); break;
+                    case 2: order.emplace_back(+ x, i); break;
+                    case 3: order.emplace_back(- x, i); break;
+                }
+            }
+            sort(ALL(order));
+
+            array<pair<int, Action>, K> nxt;
+            fill(ALL(nxt), make_pair(-1, Action::Wait()));
+            double next_score = 0;
+            array<array<int8_t, H>, W> next_used;
+            REP (y, H) REP (x, W) next_used[y][x] = -1;
+
+            for (auto it : order) {
+                int i = it.second;
+                int t0 = cur[i].first;
+                int y = cur[i].second.putPos().y;
+                int x = cur[i].second.putPos().x;
+                while (true) {
+                    int ny = y;
+                    int nx = x;
+                    switch (dir) {
+                        case 0: -- ny; break;
+                        case 1: ++ ny; break;
+                        case 2: ++ nx; break;
+                        case 3: -- nx; break;
+                    }
+                    if (not is_on_oven(ny, nx)) break;
+                    if (t0 < puttable_t[i][ny][nx]) break;
+                    if (does_conflict(nxt, next_used, i, t0, ny, nx)) break;
+                    y = ny;
+                    x = nx;
+                }
+                next_score += get_score_delta_put(nxt, next_used, i, t0, y, x);
+                put(nxt, next_used, i, t0, y, x);
+            }
+            auto delta = next_score - score;
+            double temperature = (double)(ITERATION - iteration) / ITERATION;
+            double BOLTZMANN = 0.001;
+            if (0 <= delta or bernoulli_distribution(exp(BOLTZMANN * delta) * temperature)(gen)) {
+                score = next_score;
+                cur = nxt;
+                used = next_used;
+                placed.clear();
+                used_t0 = set<int>();
+                REP (j, K) if (cur[j].first != -1) {
+                    placed.push_back(j);
+                    used_t0.insert(cur[j].first);
+                }
+                if (highscore < score) {
+                    highscore = score;
+                    result = cur;
+                }
             }
 
         } else {
